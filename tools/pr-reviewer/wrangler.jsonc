@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "inspect-robots-reviewer",
+  "account_id": "7f405baff0972dc740a02ee0f700d2c1",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "vars": {"MODE": "advisory", "ENABLED": "false"},
+  "services": [{"binding": "PUBLISHER", "service": "inspect-robots-review-publisher", "entrypoint": "GithubPublisher"}],
+  "durable_objects": {"bindings": [{"name": "LEDGER", "class_name": "ReviewLedger"}]},
+  "migrations": [{"tag": "v1", "new_sqlite_classes": ["ReviewLedger"]}],
+  "workflows": [{"binding": "REVIEW", "name": "inspect-robots-review", "class_name": "ReviewWorkflow"}],
+  "triggers": {"crons": ["*/10 * * * *"]},
+  "observability": {"enabled": true},
+  "limits": {"cpu_ms": 30000},
+  "rules": [{"type": "Text", "globs": ["**/*.md"], "fallthrough": true}]
+}
