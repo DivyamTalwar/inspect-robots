@@ -79,7 +79,7 @@ export async function boundedText(response: Response | Request, limit = 2_000_00
 
 // Untrusted prose cannot inject mentions, hidden markup or remote media into a bot comment.
 export function publicText(text: string): string {
-  return text.replace(/<!--[\s\S]*?-->/g, '').replace(/<[^>]*>/g, '').replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/!\[[^\]]*\]\([^)]*\)/g, '')
     .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/https?:\/\/\S+/g, '[link omitted]')
     .replace(/@/g, '@\u200b').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u202a-\u202e\u2066-\u2069]/g, '').replace(/—/g, ',');
 }

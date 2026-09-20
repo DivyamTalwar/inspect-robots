@@ -30,7 +30,10 @@ describe('review gates', () => {
   });
   it('neutralizes untrusted mentions, links and hidden markup', () => {
     const output = publicText('<!-- hidden --><img src=x> @jeqcho ![secret](https://bad.test/key) https://bad.test');
-    expect(output).not.toMatch(/@jeqcho|https:|<img|hidden/);
+    expect(output).not.toMatch(/@jeqcho|https:|<img|<!--/);
+    expect(output).toContain('&lt;!-- hidden --&gt;');
+    // Removing a nested tag can reconstruct another tag. Escape every delimiter instead.
+    expect(publicText('<scr<script>ipt>alert(1)</script><!<!-- -->-->&#60;img src=x>')).not.toMatch(/[<>]/);
   });
   it('rejects old heads, changed bases, drafts and closed PRs', () => {
     const s = { number: 9, head, base, title: '', body: '', draft: false, state: 'open', author: '' };
