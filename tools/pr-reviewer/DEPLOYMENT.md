@@ -16,8 +16,8 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
-- Publisher version: `6f74706a-0882-4668-af68-09910d3b1afa`.
-- Reviewer version: `c82ab9bc-7d0e-4b21-b20a-4b1b97615883`.
+- Publisher version: `75e8bd49-206d-47ba-8283-7066e1f72c42`.
+- Reviewer version: `1d836ed3-3b91-4db1-b924-8f527f143888`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -75,3 +75,10 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Live workflow `90dfed5db293fd070613dafecef32a618ee95003f12e97a9` completed and published ESCALATE: scope needs Jay's decision and technical inspection remained incomplete. Codex reported 131 plugin tests passing.
 - The session completed 12 model calls, booked $2.132670 in model usage plus the $0.10 sandbox allowance, and issued no approval. These ledger amounts are conservative allowances, not invoice totals.
 - Published review: https://github.com/robocurve/inspect-robots/pull/456#issuecomment-5752014167
+
+## Review presentation
+
+- Future scope/value decisions use `NEED_REVIEWER`; escalation and merge notifications still mention `@jeqcho`.
+- Verdict comments start with a bounded, one- or two-sentence TL;DR and the requested action. Supporting findings, test results and command records are in an expandable section. Incomplete-run notices also start with a TL;DR.
+- The prompt prohibits repeating the summary, scope decision and test results across paragraphs. Existing published reviews were not rewritten and no paid review was triggered for this presentation change.
+- TypeScript and all 34 reviewer tests passed.

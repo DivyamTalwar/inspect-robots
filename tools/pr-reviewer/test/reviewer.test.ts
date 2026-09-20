@@ -18,7 +18,7 @@ const pr = { number: 9, head: { sha: head }, base: { sha: base }, state: 'open',
 describe('review gates', () => {
   it('rejects approvals with unapproved scope, missing evidence, or blockers', () => {
     expect(validateReview(approval).verdict).toBe('APPROVE');
-    for (const change of [{ scope: 'NEEDS_JAY' }, { worthwhile: 'NO' }, { sufficient_review: false }, { recommended_action: 'CLOSE' }, { decision_needed: 'Choose API' }]) expect(() => validateReview({ ...approval, ...change })).toThrow();
+    for (const change of [{ scope: 'NEED_REVIEWER' }, { worthwhile: 'NO' }, { sufficient_review: false }, { recommended_action: 'CLOSE' }, { decision_needed: 'Choose API' }]) expect(() => validateReview({ ...approval, ...change })).toThrow();
   });
   it('requires a concrete decision for escalation and a blocker for changes', () => {
     expect(() => validateReview({ ...approval, verdict: 'ESCALATE', recommended_action: 'CLOSE' })).toThrow();
@@ -26,8 +26,15 @@ describe('review gates', () => {
   });
   it('only asks Jay to merge when this revision has green CI', () => {
     expect(renderReview(job, approval, false)).not.toContain('@jeqcho');
-    expect(renderReview(job, approval, true)).toContain('@jeqcho');
-    expect(renderReview(job, { ...approval, verdict: 'ESCALATE', recommended_action: 'CLOSE', decision_needed: 'The existing plan excludes this dependency.' }, false)).toContain('@jeqcho, please decide whether to close');
+    const merged = renderReview(job, approval, true);
+    expect(merged).toMatch(/^\*\*TL;DR:\*\* APPROVE\. Confirmed bug fix\./);
+    expect(merged).toContain('@jeqcho');
+    expect(merged.indexOf('@jeqcho')).toBeLessThan(merged.indexOf('<details>'));
+    expect(merged.split(approval.rationale)).toHaveLength(2);
+    expect(merged).toContain(approval.contract_and_test_review);
+    const escalated = renderReview(job, { ...approval, verdict: 'ESCALATE', recommended_action: 'CLOSE', decision_needed: 'The existing plan excludes this dependency.' }, false);
+    expect(escalated).toContain('@jeqcho, please decide whether to close');
+    expect(escalated.indexOf('The existing plan excludes this dependency.')).toBeLessThan(escalated.indexOf('<details>'));
   });
   it('neutralizes untrusted mentions, links and hidden markup', () => {
     const output = publicText('<!-- hidden --><img src=x> @jeqcho ![secret](https://bad.test/key) https://bad.test');

@@ -14,8 +14,11 @@ PR content cannot replace it.
 | REQUEST_CHANGES | Established scope with concrete implementation defects | Explain the trigger, expected/actual behavior, impact and fix |
 | ESCALATE | Scope, necessity, competing proposals or missing evidence needs judgment | Tag `@jeqcho` with a precise decision; closure is only a recommendation |
 
-Comments include the immutable head/base, verdict, worthwhile/scope decisions,
-rationale, contract and test review, blockers, checks, limitations and next action.
+Comments start with a one- or two-sentence TL;DR describing the change and the
+reason for the verdict, followed immediately by the requested action. Detailed
+findings, immutable head/base, contract review, tests and command records are
+in an expandable section. Scope and value decisions requiring a human use
+`NEED_REVIEWER`; escalation and merge requests still mention `@jeqcho`.
 They disclose automation and record actual sandbox commands separately from CI. Contributor
 intent and personal characteristics are never grounds for a finding.
 

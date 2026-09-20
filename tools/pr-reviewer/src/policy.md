@@ -80,7 +80,16 @@ content, do not claim a complete review. Never silently omit parts of a large PR
 ## Public voice and output
 
 Return the provided JSON schema. Public body should be short, specific, courteous
-and useful. Acknowledge concrete work when warranted. No generic praise, em
+and useful. The publisher places rationale first as the TL;DR: use one or two
+short sentences, at most 360 characters, stating what the PR changes and the
+main reason for the verdict. If review is incomplete, say so there. Do not repeat
+the verdict label; the publisher adds it. Put the concrete decision and options
+in decision_needed, at most two short sentences and 500 characters. This appears
+immediately after the TL;DR. Details, findings, checks and command records appear
+in an expandable section. Use body only for additional useful evidence; do not
+repeat rationale, decision_needed, or the test results in multiple fields. Keep
+test results in checks and describe unverified coverage in limitations.
+Acknowledge concrete work when warranted. No generic praise, em
 dashes, decorative emoji, inline bold emphasis, slogans, accusation or template
 flattery. Explain findings with evidence and a practical fix. Do not copy hidden
 HTML, images, arbitrary external links or mentions from source material. Do not

@@ -11,17 +11,17 @@ export const LIMITS = { review: 5_000_000, pr: 15_000_000, month: 200_000_000, w
 export const POLICY_VERSION = '1';
 
 export const ReviewSchema = z.object({
-  worthwhile: z.enum(['YES', 'NO', 'NEEDS_JAY']),
-  scope: z.enum(['ESTABLISHED', 'NEEDS_JAY']),
+  worthwhile: z.enum(['YES', 'NO', 'NEED_REVIEWER']),
+  scope: z.enum(['ESTABLISHED', 'NEED_REVIEWER']),
   verdict: z.enum(['APPROVE', 'REQUEST_CHANGES', 'ESCALATE']),
   recommended_action: z.enum(['MERGE', 'REVISE', 'CLOSE', 'NEEDS_DECISION']),
-  rationale: z.string(),
+  rationale: z.string().max(360).describe('TL;DR in one or two short sentences: what this PR changes and the main reason for the verdict. No background narrative or repeated verdict label.'),
   blockers: z.array(z.object({ file: z.string(), line: z.number().int(), trigger: z.string(), expected: z.string(), actual: z.string(), impact: z.string(), fix: z.string() })),
   contract_and_test_review: z.string(),
   checks: z.array(z.string()),
   limitations: z.array(z.string()),
   sufficient_review: z.boolean(),
-  decision_needed: z.string(),
+  decision_needed: z.string().max(500).describe('For escalation, the concrete decision and options in at most two short sentences. Otherwise empty.'),
   body: z.string(),
 });
 export type Review = z.infer<typeof ReviewSchema>;
@@ -86,12 +86,14 @@ export function publicText(text: string): string {
 }
 
 export function renderReview(job: Job, review: Review, ciGreen: boolean, executions: z.infer<typeof ExecutionRecords> = []): string {
-  let body = `Automated independent review of commit \`${job.head}\` (base \`${job.base}\`).\n\nVerdict: ${review.verdict}\nWorthwhile: ${review.worthwhile}\nScope: ${review.scope}\nRecommendation: ${review.recommended_action}\n\n${publicText(review.rationale)}\n\n${publicText(review.body)}\n\nContracts and tests: ${publicText(review.contract_and_test_review)}`;
-  for (const b of review.blockers) body += `\n\n${publicText(b.file)}:${b.line}: ${publicText(b.trigger)}\nExpected: ${publicText(b.expected)}\nObserved from code: ${publicText(b.actual)}\nImpact: ${publicText(b.impact)}\nSuggested fix: ${publicText(b.fix)}`;
-  body += `\n\nChecks: ${publicText(review.checks.join('; '))}\n${executions.length ? 'Sandbox execution records (CI is checked separately):' : 'No sandbox commands were executed; CI is checked separately.'}`;
-  for (const execution of executions.slice(0, 10)) body += `\n- Revision ${execution.revision.slice(0, 12)}, exit ${execution.exitCode ?? 'unknown'}${execution.limit ? `, ${publicText(execution.limit)}` : ''}: ${publicText(execution.command.slice(0, 500)).replace(/\n/g, ' ')}`;
-  if (review.limitations.length) body += `\nLimitations: ${publicText(review.limitations.join('; '))}`;
+  let body = `**TL;DR:** ${review.verdict}. ${publicText(review.rationale).replace(/\s+/g, ' ').trim()}`;
   if (review.verdict === 'APPROVE') body += ciGreen ? '\n\n@jeqcho, review approved and ci-ok is green for this revision. Please review and merge if you agree.' : '\n\nReview approved. Waiting for ci-ok before requesting a merge.';
-  else if (review.verdict === 'ESCALATE') body += `\n\n@jeqcho, ${review.recommended_action === 'CLOSE' ? 'please decide whether to close this PR. ' : 'your decision is needed. '}${publicText(review.decision_needed)}`;
-  return body;
+  else if (review.verdict === 'ESCALATE') body += `\n\n@jeqcho, ${review.recommended_action === 'CLOSE' ? 'please decide whether to close this PR. ' : 'your decision is needed. '}${publicText(review.decision_needed).replace(/\s+/g, ' ').trim()}`;
+  else body += `\n\nPlease address the ${review.blockers.length === 1 ? 'blocking finding' : `${review.blockers.length} blocking findings`} detailed below.`;
+  body += `\n\n<details>\n<summary>Review details, findings and checks</summary>\n\nAutomated independent review of commit \`${job.head}\` (base \`${job.base}\`).\n\nWorthwhile: ${review.worthwhile}\nScope: ${review.scope}\nRecommendation: ${review.recommended_action}\n\n${publicText(review.body)}\n\nContracts and tests: ${publicText(review.contract_and_test_review)}`;
+  for (const b of review.blockers) body += `\n\n${publicText(b.file)}:${b.line}: ${publicText(b.trigger)}\nExpected: ${publicText(b.expected)}\nObserved from code: ${publicText(b.actual)}\nImpact: ${publicText(b.impact)}\nSuggested fix: ${publicText(b.fix)}`;
+  body += `\n\nChecks: ${publicText(review.checks.join('; '))}\n\n${executions.length ? 'Sandbox execution records (CI is checked separately):\n' : 'No sandbox commands were executed; CI is checked separately.'}`;
+  for (const execution of executions.slice(0, 10)) body += `\n- Revision ${execution.revision.slice(0, 12)}, exit ${execution.exitCode ?? 'unknown'}${execution.limit ? `, ${publicText(execution.limit)}` : ''}: ${publicText(execution.command.slice(0, 500)).replace(/\n/g, ' ')}`;
+  if (review.limitations.length) body += `\n\nLimitations: ${publicText(review.limitations.join('; '))}`;
+  return body + '\n\n</details>';
 }
