@@ -10,7 +10,8 @@ export async function readFile(read: Read, job: Job, path: string, revision: 'ba
   const data = await read(`/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${job[revision]}`);
   if (data.type !== 'file' || data.encoding !== 'base64' || data.size > 100_000 || typeof data.content !== 'string') throw new Error('file_not_inspectable');
   const bytes = Uint8Array.from(atob(data.content.replace(/\s/g, '')), c => c.charCodeAt(0));
-  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
+  // Preserve a BOM so a nonempty file cannot masquerade as an empty addition.
+  const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);
   if (text.includes('\0')) throw new Error('binary_file');
   return { path, revision, text, lines: text.split('\n').length };
 }
@@ -24,16 +25,21 @@ export async function collectContext(read: Read, job: Job) {
   const evidence: FileEvidence[] = [];
   let bytes = 0;
   for (const file of files) {
-    if (typeof file.patch !== 'string') throw new Error('uninspectable_diff');
+    const missingPatch = typeof file.patch !== 'string';
+    // GitHub omits patches for empty files. Zero diff counts alone are not
+    // evidence of emptiness: binary additions also have zero line counts.
+    if (missingPatch && !(['added', 'removed'].includes(file.status) && file.additions === 0 && file.deletions === 0 && file.changes === 0)) throw new Error('uninspectable_diff');
     // Read both complete versions: changed tests cannot hide weakened assertions.
     for (const revision of ['base', 'head'] as const) {
       if ((revision === 'base' && file.status === 'added') || (revision === 'head' && file.status === 'removed')) continue;
       const path = revision === 'base' ? file.previous_filename ?? file.filename : file.filename;
       const entry = await readFile(read, job, path, revision);
+      if (missingPatch && entry.text !== '') throw new Error('uninspectable_diff');
       bytes += entry.text.length;
       if (bytes > 450_000) throw new Error('review_too_large');
       evidence.push(entry);
     }
+    if (missingPatch) file.patch = '';
   }
   const tree = await read(`/git/trees/${job.base}?recursive=1`);
   if (tree.truncated) throw new Error('incomplete_repository_tree');

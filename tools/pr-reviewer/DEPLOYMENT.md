@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Both Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 24 offline review safety tests passed.
+- TypeScript and 28 offline review safety tests passed.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. Both Workers deployed successfully.
 - Publisher version: `59b0c1ce-584e-4ba1-944b-56bdaf4eead9`.
-- Reviewer version: `ff6bc1e5-3912-40c5-add2-c735a63ce895`.
+- Reviewer version: `c44d5b76-caad-4c3f-bdae-14b95d1ec895`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -31,10 +31,19 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
 - Fixed an outbound request compatibility failure found by the live probe.
   Explicit Worker Requests use manual redirect handling and reject all 3xx
   responses, preventing credential forwarding. Regression test included.
-- No merge rules were changed. No existing PR backlog was reviewed.
+- No merge rules were changed. No existing PR backlog was imported.
+- Restored Sravanthi's merged-and-reverted PR #453 as trial PR #456 by
+  reverting #454. Its tree matches the original merged implementation exactly.
+- The first trial stopped before inference because GitHub omits patches for
+  empty files. Fixed by verifying complete immutable file contents are empty;
+  zero diff counts alone cannot bypass the missing-patch guard. Regression
+  tests cover additions, removals, binary data and BOM-only files.
+- A `/review` rerun reached the existing 100,000-byte per-file cap: the
+  restored `uv.lock` is 524,568 bytes. Workflow
+  `679ba5b31f920ab2086ff632283630c0520279906ccaa88b` published a held result
+  and tagged Jay. Neither trial reached model submission or budget reservation;
+  no model-review verdict was produced. PR #456 remains open with green CI.
 
-No further setup is required for advisory processing. No existing PR backlog was
-imported, and no full model review was requested during activation. The first new
-non-draft PR or revision will exercise the complete review and publication path.
+No further setup is required for advisory processing.
 Turning the independent review check into a merge requirement is a separate
 rollout decision. Implementation is tracked in PR #455; deployment is already live.

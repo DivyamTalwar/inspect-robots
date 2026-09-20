@@ -117,6 +117,32 @@ describe('untrusted input and complete context', () => {
     await expect(readFile(async () => ({ type: 'file', encoding: 'base64', size: 1, content: btoa('\0') }), job, 'x', 'head')).rejects.toThrow('binary_file');
     await expect(readFile(async () => ({}), job, '../x', 'head')).rejects.toThrow('invalid_file_path');
   });
+  it.each(['added', 'removed'])('verifies an empty %s file when GitHub omits its patch', async status => {
+    const reads: string[] = [];
+    const context = await collectContext(async path => {
+      reads.push(path);
+      if (path === '/pulls/9') return pr;
+      if (path.includes('/files?')) return [{ filename: 'py.typed', status, additions: 0, deletions: 0, changes: 0 }];
+      if (path.startsWith('/contents/')) return { type: 'file', encoding: 'base64', size: 0, content: '' };
+      if (path.startsWith('/git/trees/')) return { truncated: false, tree: [] };
+      return [];
+    }, job);
+    expect(context.evidence).toEqual([{ path: 'py.typed', revision: status === 'added' ? 'head' : 'base', text: '', lines: 1 }]);
+    expect(context.files[0].patch).toBe('');
+    expect(reads.filter(path => path.startsWith('/contents/'))).toEqual([`/contents/py.typed?ref=${status === 'added' ? head : base}`]);
+  });
+  it('does not treat zero diff counts as proof that a file is empty', async () => {
+    for (const content of ['not empty', '\0', '\xef\xbb\xbf']) {
+      await expect(collectContext(async path => {
+        if (path === '/pulls/9') return pr;
+        if (path.includes('/files?')) return [{ filename: 'unknown.bin', status: 'added', additions: 0, deletions: 0, changes: 0 }];
+        return { type: 'file', encoding: 'base64', size: content.length, content: btoa(content) };
+      }, job)).rejects.toThrow(content === '\0' ? 'binary_file' : 'uninspectable_diff');
+    }
+  });
+  it('retains the per-file size limit', async () => {
+    await expect(readFile(async () => ({ type: 'file', encoding: 'base64', size: 100_001, content: '' }), job, 'uv.lock', 'head')).rejects.toThrow('file_not_inspectable');
+  });
 });
 
 describe('publisher authority', () => {
