@@ -7,7 +7,10 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
-  "vars": {"MODE": "advisory", "ENABLED": "true"},
+  "vars": {
+    "MODE": "advisory", "ENABLED": "true",
+    "REVIEW_HEAD_LIMITS_JSON": "{\"456-696fbaa9a00d7c345a81dd179fa10934f51ade89\":10000000}"
+  },
   "services": [{"binding": "PUBLISHER", "service": "inspect-robots-review-publisher", "entrypoint": "GithubPublisher"}, {"binding": "RUNNER", "service": "inspect-robots-review-runner", "entrypoint": "CodeRunner"}],
   "durable_objects": {"bindings": [{"name": "LEDGER", "class_name": "ReviewLedger"}]},
   "migrations": [{"tag": "v1", "new_sqlite_classes": ["ReviewLedger"]}],

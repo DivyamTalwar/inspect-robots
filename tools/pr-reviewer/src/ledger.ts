@@ -2,6 +2,16 @@ import { DurableObject } from 'cloudflare:workers';
 import { LIMITS, type Job } from './common';
 
 export class ReviewLedger extends DurableObject<ReviewerEnv> {
+  private reviewLimit(job: string, pr: number): number {
+    // Deployment-controlled exceptions only; webhooks and model tools cannot
+    // alter budgets. Every exception still shares the PR and monthly limits.
+    const overrides = JSON.parse(this.env.REVIEW_HEAD_LIMITS_JSON ?? '{}');
+    if (!overrides || Array.isArray(overrides) || typeof overrides !== 'object') throw new Error('invalid_budget_config');
+    for (const [key, value] of Object.entries(overrides)) {
+      if (!/^[1-9][0-9]*-[a-f0-9]{40}$/.test(key) || !Number.isSafeInteger(value) || (value as number) < 1 || (value as number) > LIMITS.pr) throw new Error('invalid_budget_config');
+    }
+    return job.startsWith(`${pr}-`) ? overrides[job] ?? LIMITS.review : LIMITS.review;
+  }
   constructor(ctx: DurableObjectState, env: ReviewerEnv) {
     super(ctx, env);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, pr INTEGER NOT NULL, head TEXT NOT NULL, base TEXT NOT NULL, scope TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', result TEXT, notified INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)`);
@@ -29,7 +39,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
   async remaining(job: string, pr: number): Promise<number> {
     const month = new Date().toISOString().slice(0, 7);
     const sums = this.ctx.storage.sql.exec<{ review: number; pr: number; month: number }>(`SELECT COALESCE(SUM(CASE WHEN job=? THEN amount ELSE 0 END),0) AS review, COALESCE(SUM(CASE WHEN pr=? THEN amount ELSE 0 END),0) AS pr, COALESCE(SUM(CASE WHEN month=? THEN amount ELSE 0 END),0) AS month FROM charges`, job, pr, month).one();
-    return Math.max(0, Math.min(LIMITS.review - sums.review, LIMITS.pr - sums.pr, LIMITS.month - sums.month));
+    return Math.max(0, Math.min(this.reviewLimit(job, pr) - sums.review, LIMITS.pr - sums.pr, LIMITS.month - sums.month));
   }
   async reserve(id: string, job: string, pr: number, amount: number): Promise<boolean> {
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('invalid_amount');
@@ -39,7 +49,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
       if (this.ctx.storage.sql.exec('SELECT id FROM charges WHERE id=?', id).toArray().length) return false;
       const month = new Date().toISOString().slice(0, 7);
       const sums = this.ctx.storage.sql.exec<{ review: number; pr: number; month: number }>(`SELECT COALESCE(SUM(CASE WHEN job=? THEN amount ELSE 0 END),0) AS review, COALESCE(SUM(CASE WHEN pr=? THEN amount ELSE 0 END),0) AS pr, COALESCE(SUM(CASE WHEN month=? THEN amount ELSE 0 END),0) AS month FROM charges`, job, pr, month).one();
-      if (sums.review + amount > LIMITS.review || sums.pr + amount > LIMITS.pr || sums.month + amount > LIMITS.month) return false;
+      if (sums.review + amount > this.reviewLimit(job, pr) || sums.pr + amount > LIMITS.pr || sums.month + amount > LIMITS.month) return false;
       this.ctx.storage.sql.exec('INSERT INTO charges(id,job,pr,month,amount) VALUES(?,?,?,?,?)', id, job, pr, month, amount);
       return true;
     });

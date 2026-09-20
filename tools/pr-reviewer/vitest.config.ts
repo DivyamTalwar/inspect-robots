@@ -6,6 +6,7 @@ export default defineConfig({
     { name: 'review-policy-text', enforce: 'pre', load(id) { if (id.endsWith('.md')) return `export default ${JSON.stringify(readFileSync(id, 'utf8'))}`; } },
     cloudflareTest({ main: './test/entry.ts', miniflare: {
       compatibilityDate: '2026-09-18', compatibilityFlags: ['nodejs_compat'],
+      bindings: { REVIEW_HEAD_LIMITS_JSON: JSON.stringify({ '456-696fbaa9a00d7c345a81dd179fa10934f51ade89': 10_000_000 }) },
       durableObjects: { LEDGER: { className: 'ReviewLedger', useSQLite: true } },
     } }),
   ],

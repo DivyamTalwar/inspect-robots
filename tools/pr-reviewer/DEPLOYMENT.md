@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 33 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
+- TypeScript and 34 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
 - Publisher version: `6f74706a-0882-4668-af68-09910d3b1afa`.
-- Reviewer version: `f83cd575-5071-4030-a5cd-d2e3afd60df5`.
+- Reviewer version: `c82ab9bc-7d0e-4b21-b20a-4b1b97615883`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -66,3 +66,12 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Corrected future settlement to credit confirmed cache reads at $1/M, added final-turn budget steering, and preserved budget-stop reasons independently of CLI stderr. Existing charges remain unchanged because historical cache usage was not retained.
 - No further paid trial was started after these fixes. A complete end-to-end verdict on PR #456 remains pending additional authorized trial allowance. The $5/head, $15/PR and $200/month limits remain unchanged.
 - Runner version: `61ee5a32-0f1f-4e23-b46c-f95e42bb31b1`.
+
+## Authorized trial budget exception
+
+- The maintainer authorized raising PR #456 head `696fbaa9a00d7c345a81dd179fa10934f51ade89` from $5 to $10 after earlier attempts consumed its shared allowance.
+- The deployment-only exception preserves charges and leaves all other heads at $5, with the $15 PR and $200 monthly ceilings unchanged.
+- All 34 offline reviewer tests passed, including concurrent reservations against the exact-head exception and the unchanged PR ceiling.
+- Live workflow `90dfed5db293fd070613dafecef32a618ee95003f12e97a9` completed and published ESCALATE: scope needs Jay's decision and technical inspection remained incomplete. Codex reported 131 plugin tests passing.
+- The session completed 12 model calls, booked $2.132670 in model usage plus the $0.10 sandbox allowance, and issued no approval. These ledger amounts are conservative allowances, not invoice totals.
+- Published review: https://github.com/robocurve/inspect-robots/pull/456#issuecomment-5752014167
