@@ -9,24 +9,33 @@ export function allowedRead(path: string): boolean {
 }
 
 export async function github(token: string, path: string, method = 'GET', body?: unknown): Promise<any> {
-  const response = await fetch(`https://api.github.com${path}`, {
-    method, redirect: 'error', signal: AbortSignal.timeout(30000),
+  const request = new Request(`https://api.github.com${path}`, {
+    method, redirect: 'manual', signal: AbortSignal.timeout(30000),
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'inspect-robots-reviewer', 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+  const response = await fetch(request);
   if (!response.ok) throw new Error(`github_http_${response.status}`);
   return JSON.parse(await boundedText(response));
 }
 
 export async function installationToken(env: PublisherEnv, write: boolean): Promise<string> {
-  const key = await importPKCS8(env.GITHUB_PRIVATE_KEY, 'RS256');
-  const now = Math.floor(Date.now() / 1000);
-  const jwt = await new SignJWT({}).setProtectedHeader({ alg: 'RS256' }).setIssuer(env.GITHUB_APP_ID).setIssuedAt(now - 60).setExpirationTime(now + 300).sign(key);
-  const result = await github(jwt, `/app/installations/${env.GITHUB_INSTALLATION_ID}/access_tokens`, 'POST', {
-    repositories: ['inspect-robots'],
-    permissions: { contents: 'read', issues: 'read', actions: 'read', pull_requests: write ? 'write' : 'read', checks: write ? 'write' : 'read' },
-  });
-  return result.token;
+  let phase = 'import_key';
+  try {
+    const key = await importPKCS8(env.GITHUB_PRIVATE_KEY, 'RS256');
+    phase = 'sign_jwt';
+    const now = Math.floor(Date.now() / 1000);
+    const jwt = await new SignJWT({}).setProtectedHeader({ alg: 'RS256' }).setIssuer(env.GITHUB_APP_ID).setIssuedAt(now - 60).setExpirationTime(now + 300).sign(key);
+    phase = 'request_installation_token';
+    const result = await github(jwt, `/app/installations/${env.GITHUB_INSTALLATION_ID}/access_tokens`, 'POST', {
+      repositories: ['inspect-robots'],
+      permissions: { contents: 'read', issues: 'read', actions: 'read', pull_requests: write ? 'write' : 'read', checks: write ? 'write' : 'read' },
+    });
+    return result.token;
+  } catch (error) {
+    console.error(JSON.stringify({ event: 'github_auth_failed', phase, name: error instanceof Error ? error.name : 'unknown' }));
+    throw error;
+  }
 }
 
 export async function ciGreen(read: (path: string) => Promise<any>, sha: string): Promise<boolean> {

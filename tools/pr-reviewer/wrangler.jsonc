@@ -7,7 +7,7 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
-  "vars": {"MODE": "advisory", "ENABLED": "false"},
+  "vars": {"MODE": "advisory", "ENABLED": "true"},
   "services": [{"binding": "PUBLISHER", "service": "inspect-robots-review-publisher", "entrypoint": "GithubPublisher"}],
   "durable_objects": {"bindings": [{"name": "LEDGER", "class_name": "ReviewLedger"}]},
   "migrations": [{"tag": "v1", "new_sqlite_classes": ["ReviewLedger"]}],

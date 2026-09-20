@@ -2,7 +2,7 @@ import { env, createExecutionContext, evictDurableObject } from 'cloudflare:test
 import { describe, expect, it, vi } from 'vitest';
 import { exportPKCS8, generateKeyPair } from 'jose';
 import { current, publicText, renderReview, validateReview, verifySignature, type Job, type Review } from '../src/common';
-import { allowedRead, ciGreen } from '../src/github';
+import { allowedRead, ciGreen, github } from '../src/github';
 import { collectContext, readFile, safePath } from '../src/context';
 import { GithubPublisher } from '../src/publisher';
 import { handleWebhook } from '../src/worker';
@@ -120,15 +120,26 @@ describe('untrusted input and complete context', () => {
 });
 
 describe('publisher authority', () => {
+  it('rejects redirects without forwarding credentials', async () => {
+    const send = vi.fn(async (request: Request) => {
+      expect(request.redirect).toBe('manual');
+      return new Response(null, { status: 302, headers: { Location: 'https://untrusted.test/' } });
+    });
+    vi.stubGlobal('fetch', send);
+    await expect(github('test-token', '/repos/robocurve/inspect-robots/pulls/9')).rejects.toThrow('github_http_302');
+    expect(send).toHaveBeenCalledTimes(1);
+  });
   it('only writes check runs and a courteous comment, and stops for a stale head', async () => {
     const { privateKey } = await generateKeyPair('RS256', { extractable: true });
     const publisher = new GithubPublisher(createExecutionContext(), { GITHUB_PRIVATE_KEY: await exportPKCS8(privateKey), GITHUB_APP_ID: '5012304', GITHUB_INSTALLATION_ID: '163290338' });
     const writes: { path: string; method: string; body: any }[] = [];
     let live = pr;
-    vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit) => {
-      const path = new URL(url).pathname;
+    vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {
+      const request = new Request(url, init);
+      const path = new URL(request.url).pathname;
+      expect(request.redirect).toBe('manual');
       if (path.endsWith('/access_tokens')) return Response.json({ token: 'test-installation-token' });
-      if (init.method !== 'GET') { writes.push({ path, method: init.method!, body: JSON.parse(init.body as string) }); return Response.json({ id: 123 }); }
+      if (request.method !== 'GET') { writes.push({ path, method: request.method, body: await request.json() }); return Response.json({ id: 123 }); }
       if (path.endsWith('/pulls/9')) return Response.json(live);
       if (path.endsWith('/check-runs')) return Response.json({ check_runs: [{ name: 'ci-ok', app: { slug: 'github-actions' }, head_sha: head, status: 'completed', conclusion: 'success' }] });
       if (path.endsWith('/comments')) return Response.json([]);

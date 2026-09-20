@@ -5,7 +5,12 @@ import { allowedRead, ciGreen, github, installationToken } from './github';
 export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
   async read(path: string): Promise<string> {
     if (!allowedRead(path)) throw new Error('read_not_allowed');
-    return JSON.stringify(await github(await installationToken(this.env, false), `/repos/${REPO}${path}`));
+    try {
+      return JSON.stringify(await github(await installationToken(this.env, false), `/repos/${REPO}${path}`));
+    } catch (error) {
+      console.error(JSON.stringify({ event: 'github_read_failed', name: error instanceof Error ? error.name : 'unknown', code: error instanceof Error && /^github_http_\d+$/.test(error.message) ? error.message : 'reader_failed' }));
+      throw error;
+    }
   }
   async publish(job: Job, result: unknown, notice?: 'started' | 'held' | 'budget-warning'): Promise<boolean> {
     if (!Number.isSafeInteger(job.pr) || job.pr < 1 || !SHA.test(job.head) || !SHA.test(job.base) || !/^[a-z0-9-]{1,100}$/.test(job.id)) throw new Error('invalid_publication');
