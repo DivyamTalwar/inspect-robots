@@ -4,6 +4,7 @@ import { ciGreen } from './github';
 import { runReview } from './review';
 import { holdReason } from './holds';
 export { ReviewLedger } from './ledger';
+export { ModelGateway } from './model-gateway';
 
 export type WebhookEnvironment = Pick<ReviewerEnv, 'ENABLED' | 'GITHUB_WEBHOOK_SECRET'> & {
   LEDGER: Pick<ReviewerEnv['LEDGER'], 'getByName'>;
@@ -83,7 +84,7 @@ async function scheduled(env: ReviewerEnv) {
         continue;
       }
       if (job.status === 'approved' && job.result && await ciGreen(p => read(env, p), job.head)) {
-        if (await env.PUBLISHER.publish(job, validateReview(JSON.parse(job.result)))) await ledger.notified(job.id);
+        if (await env.PUBLISHER.publish(job, JSON.parse(job.result))) await ledger.notified(job.id);
       } else if (job.status === 'queued' || job.status === 'running') {
         let instance;
         try { instance = await env.REVIEW.get(job.id); await instance.status(); }

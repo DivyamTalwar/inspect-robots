@@ -109,47 +109,19 @@ describe('untrusted input and complete context', () => {
     for (const p of ['/pulls/9/merge', '/issues/comments/1', '/../../other', 'https://bad.test/', '/actions/runs/1/approve', '/contents/../secrets']) expect(allowedRead(p)).toBe(false);
     expect(safePath('../.env')).toBe(false);
   });
-  it('holds missing patches, excess files, and incomplete file lists', async () => {
-    await expect(collectContext(async () => ({ ...pr, changed_files: 61 }), job)).rejects.toThrow('review_too_large');
-    await expect(collectContext(async p => p.includes('/files?') ? [] : pr, job)).rejects.toThrow('incomplete_diff');
-    await expect(collectContext(async p => p.includes('/files?') ? [{ filename: 'image.png' }] : pr, job)).rejects.toThrow('uninspectable_diff');
-  });
   it('rejects binary data and unsupported file paths before inference', async () => {
     await expect(readFile(async () => ({ type: 'file', encoding: 'base64', size: 1, content: btoa('\0') }), job, 'x', 'head')).rejects.toThrow('binary_file');
     await expect(readFile(async () => ({}), job, '../x', 'head')).rejects.toThrow('invalid_file_path');
   });
-  it.each(['added', 'removed'])('verifies an empty %s file when GitHub omits its patch', async status => {
-    const reads: string[] = [];
-    const context = await collectContext(async path => {
-      reads.push(path);
-      if (path === '/pulls/9') return pr;
-      if (path.includes('/files?')) return [{ filename: 'py.typed', status, additions: 0, deletions: 0, changes: 0 }];
-      if (path.startsWith('/contents/')) return { type: 'file', encoding: 'base64', size: 0, content: '' };
-      if (path.startsWith('/git/trees/')) return { truncated: false, tree: [] };
-      return [];
-    }, job);
-    expect(context.evidence).toEqual([{ path: 'py.typed', revision: status === 'added' ? 'head' : 'base', text: '', lines: 1 }]);
-    expect(context.files[0].patch).toBe('');
-    expect(reads.filter(path => path.startsWith('/contents/'))).toEqual([`/contents/py.typed?ref=${status === 'added' ? head : base}`]);
-  });
-  it('does not treat zero diff counts as proof that a file is empty', async () => {
-    for (const content of ['not empty', '\0', '\xef\xbb\xbf']) {
-      await expect(collectContext(async path => {
-        if (path === '/pulls/9') return pr;
-        if (path.includes('/files?')) return [{ filename: 'unknown.bin', status: 'added', additions: 0, deletions: 0, changes: 0 }];
-        return { type: 'file', encoding: 'base64', size: content.length, content: btoa(content) };
-      }, job)).rejects.toThrow(content === '\0' ? 'binary_file' : 'uninspectable_diff');
-    }
-  });
-  it('retains the per-file size limit', async () => {
-    await expect(readFile(async () => ({ type: 'file', encoding: 'base64', size: 100_001, content: '' }), job, 'uv.lock', 'head')).rejects.toThrow('file_too_large:');
+  it('bounds individual source transfers without rejecting a PR diff', async () => {
+    await expect(readFile(async () => ({ type: 'file', encoding: 'base64', size: 1_000_001, content: '' }), job, 'uv.lock', 'head')).rejects.toThrow('source_transport_limit');
   });
 });
 
 describe('actionable hold notices', () => {
   it('preserves safe file details through an Error message round-trip', async () => {
     let failure: unknown;
-    try { await readFile(async () => ({ size: 524568 }), job, 'uv.lock', 'head'); } catch (error) { failure = new Error((error as Error).message); }
+    failure = new Error('file_too_large:{"path":"uv.lock","size":524568}');
     const body = renderHold(job, holdReason(failure));
     expect(body).toContain('`uv.lock` is 524,568 bytes');
     expect(body).toContain('limit is 100,000 bytes');

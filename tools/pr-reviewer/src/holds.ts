@@ -2,6 +2,8 @@ import { z } from 'zod';
 import type { Job } from './common';
 
 const reasons = {
+  codex_review_incomplete: ['The Codex review session ended without a complete verdict.', 'Inspect its run status and remaining budget before rerunning. No partial output has been treated as approval.'],
+  sandbox_execution_failed: ['The isolated Codex environment could not finish the review.', 'Inspect the private sandbox run, fix the environment issue, then rerun.'],
   file_too_large: ['A file exceeds the reviewer’s 100,000-byte per-file limit.', 'Add bounded large-file handling to the reviewer, then rerun with `/review`. Repeating the unchanged run will hit the same limit.'],
   file_not_inspectable: ['GitHub returned a file in a format the reviewer cannot inspect.', 'Check the affected files and add supported inspection before rerunning.'],
   uninspectable_diff: ['GitHub omitted a required text diff, and the file could not be verified as empty.', 'Inspect the omitted diff and resolve the coverage gap before rerunning.'],

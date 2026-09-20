@@ -16,7 +16,7 @@ PR content cannot replace it.
 
 Comments include the immutable head/base, verdict, worthwhile/scope decisions,
 rationale, contract and test review, blockers, checks, limitations and next action.
-They disclose automation and that the reviewer did not execute tests. Contributor
+They disclose automation and record actual sandbox commands separately from CI. Contributor
 intent and personal characteristics are never grounds for a finding.
 
 The bot does not merge, close, label, submit formal approving reviews, edit code,
@@ -25,28 +25,44 @@ Making this check required needs a separate maintainer decision.
 
 ## Architecture and credentials
 
-The public Worker authenticates GitHub HMAC signatures, restricts repository and
-installation IDs, deduplicates jobs in a SQLite Durable Object, then starts a
-durable Workflow. The Workflow reads immutable source, tests, repo docs, linked
-issues, maintainer decisions and open PRs, then runs bounded read-only model calls.
+The public Worker authenticates GitHub HMAC signatures, restricts the repository
+and installation, deduplicates jobs in a SQLite Durable Object and starts a Workflow.
+The review engine is Codex CLI 0.155.1, running `gpt-6-astra` with high reasoning
+in a new disposable Cloudflare Sandbox. It receives the versioned natural-language
+review policy, immutable head and merge-base source snapshots, and PR/issue context.
+Codex uses its own multi-turn file, search and shell tools to inspect local diffs
+and run focused checks. We do not implement a separate model/tool loop or send
+both complete versions of every changed file to the model. Large unchanged files
+therefore do not trigger the former 100 KB per-file gate.
 
-A separate publisher Worker has no public URL. It alone holds the GitHub App
-private key. Its service binding exposes an allowlisted GET reader and a validated
-comment/check publisher. Read calls use installation tokens reduced to read-only
-permissions. No generic write endpoint, merge or close method exists. The model
-only sees a `read_file` tool, never either credential or publisher methods.
+A private publisher Worker alone holds the GitHub App key. Its service binding
+exposes bounded allowlisted reads and validated comments/check runs, with no merge,
+close or arbitrary write method. Native `pull_requests:write` technically permits
+closing, so protect the App key and publisher deployment. `contents:read` prevents
+merges. The sandbox receives neither the App key nor a GitHub installation token.
 
-GitHub cannot grant strictly comments-only PR permission. The App has
-`pull_requests:write` and `checks:write`; the former technically permits closing
-PRs. The publisher's code limits this broader permission to comments and checks.
-`contents:read` prevents merges. Protect the private key and publisher deployment
-access as privileged credentials.
+A private model gateway outside the sandbox holds the OpenAI key and enforces
+spending before each inference request. Codex receives only a short-lived capability
+for its own review budget. Outbound networking is denied except for the internal
+Responses proxy; arbitrary hosts, provider endpoints and paid provider tools are
+not allowed. Exact duplicate submissions cannot double-charge an ambiguous request.
+Streamed usage settles reservations, while missing usage retains them. The CLI's
+own automatic request/stream retries are disabled.
 
-No contributor code runs. Complete changed files at base/head are inspected;
-binary files, missing patches, more than 60 files, incomplete pagination and
-oversized contexts cause a hold. Supporting files are fetched only from those
-two immutable commits. Findings are checked against inspected file locations.
-Model judgments can still be wrong; Jay makes final decisions.
+The sandbox runs Codex and its commands as an unprivileged user. Scratch files
+persist within that fresh session and are destroyed afterward. Python 3.11,
+NumPy, pytest, hypothesis, pip, Hatch and rg are preinstalled. Offline local package
+builds are allowed. Network dependency installs and hardware checks are unavailable.
+Codex has a 20-minute deadline, with an independent container shutdown at 22 minutes.
+Only one basic container can run at once. Provider credentials and GitHub publishing
+remain outside this environment even though Codex can execute arbitrary review code.
+
+Each sandbox session reserves $0.10 conservatively against the same spending caps.
+That is a budget allowance, not a claim that Cloudflare charges ten cents. Its model
+calls consume the remaining allowance. A partial/failed CLI result cannot approve;
+complete output is validated against the review schema and cited file locations.
+Comments include actual CLI command records separately from CI results. Model
+judgments can still be wrong; Jay makes final decisions.
 
 The job key includes both head and base. Every publication rechecks the live PR.
 GitHub has no atomic compare-and-comment API: a push can race the final request,
@@ -56,7 +72,7 @@ so every comment names its exact revision and checks attach to that head only.
 
 | Limit | Amount |
 | --- | --- |
-| All model calls for one PR head, including reruns | $5 |
+| Model calls and sandbox allowances for one PR head, including reruns | $5 |
 | All revisions/reruns of a PR, lifetime | $15 |
 | All reviews per UTC calendar month | $200 |
 | Monthly warning to Jay | $160 |
@@ -66,8 +82,13 @@ Input is counted using OpenAI's token-count endpoint, limited to 200,000 tokens,
 and reserved at $13/M plus a small token margin. This conservatively covers the
 published $10/M ordinary input and $12.50/M cache-write pricing. Output, including
 reasoning, is reserved at $50/M. Each call allows at most 16,000 output tokens;
-a review allows six calls. Actual usage settles at the conservative input rate,
-so the ledger may reach its limit before the OpenAI bill does.
+Codex continues across turns within the total budget and session deadline.
+Confirmed cache reads settle at the published $1/M rate; other input settles at
+the conservative $13/M ceiling. Reservations never assume a future cache hit.
+The gateway supplies the remaining budget each turn and requests a final answer
+before further investigation becomes unaffordable. If material evidence is
+missing, that answer must escalate. The ledger can still reach its limit before
+the OpenAI bill does. See [Astra pricing](https://developers.openai.com/api/docs/models/gpt-6-astra).
 
 No inference submission retries automatically. Ambiguous failures retain the
 full reservation, including across a process restart. Only retrieval/publication
@@ -102,6 +123,7 @@ settings. No model API key is needed in GitHub Actions.
 npm ci
 npm run types
 npm run check
+npm run deploy:runner
 npm run deploy:publisher
 npm run deploy:reviewer
 node scripts/setup.mjs secrets
@@ -114,7 +136,7 @@ generates a private webhook secret there and uploads credentials through Wrangle
 stdin. It never prints values. Deploy initially with `ENABLED=false`, upload
 secrets, enable App webhooks and subscribe to **Pull request** and **Issue comment**
 in GitHub App settings, configure the URL/secret, then set `ENABLED=true` and
-redeploy. Cloudflare account ID is explicit in both configs.
+redeploy. Cloudflare account ID is explicit in all three configs.
 
 The configured CPU allowances require Workers Paid (currently a $5/month base
 subscription); Free's 10 ms invocation limit is unsuitable for reliably parsing
@@ -123,18 +145,20 @@ large review contexts. See [Cloudflare pricing](https://developers.cloudflare.co
 To pause new reviews, set `ENABLED=false` and redeploy. Terminate in-flight
 Workflows too if immediate cessation is required. `/health` reports enabled state
 and policy version without secrets. Logs contain opaque job IDs and safe error
-categories; do not enable SDK request debugging. OpenAI background responses and
-Cloudflare Workflow state retain review context; no cross-PR conversation is used.
+categories; do not enable SDK request debugging. Cloudflare Workflow state retains review context; OpenAI requests use `store=false`
+and `background=false`. No cross-PR conversation is used.
 
 Tests use the real local Workers/SQLite runtime with all network calls mocked.
 They cover concurrent spending, replay, head changes, untrusted inputs, decision
 consistency, publication boundaries and ambiguous model failures. CI runs them
 without production credentials.
 
-Hosting estimate: a few hundred reviews per month should fit the included
+Hosting estimate (before adding sandbox execution): a few hundred reviews per month should fit the included
 Workers, Workflows and SQLite allowances, so the expected incremental hosting
 charge is $0 beyond the $5 base subscription. Allow $1-$2 headroom pending real
 usage; this is an estimate, not a hard hosting cap. Quotas are shared across the
 account. Workflows include 500,000 steps and 1 GB-month of state; API waiting and
 step sleeps do not incur Workflow CPU time. See [Workflow pricing](https://developers.cloudflare.com/workflows/reference/pricing/)
 and [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
+
+Sandbox execution additionally uses Cloudflare Containers CPU, memory and disk. The runner scales to zero and permits one basic instance. Budget allowances bound requested executions conservatively, but the Cloudflare invoice is separate from OpenAI and its $5 base subscription. See [Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/). Docker is needed to build/deploy the runner image.

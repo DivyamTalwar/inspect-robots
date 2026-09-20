@@ -25,6 +25,7 @@ export const ReviewSchema = z.object({
   body: z.string(),
 });
 export type Review = z.infer<typeof ReviewSchema>;
+export const ExecutionRecords = z.array(z.object({ revision: z.string().regex(/^[a-f0-9]{40}$/), command: z.string().max(12000), exitCode: z.number().int().nullable(), limit: z.string().nullable() })).max(100);
 export type Snapshot = { number: number; head: string; base: string; title: string; body: string; draft: boolean; state: string; author: string };
 export type Job = { id: string; pr: number; head: string; base: string; scope: string; status: string; result: string | null; notified: number; created: number };
 
@@ -84,10 +85,11 @@ export function publicText(text: string): string {
     .replace(/@/g, '@\u200b').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u202a-\u202e\u2066-\u2069]/g, '').replace(/—/g, ',');
 }
 
-export function renderReview(job: Job, review: Review, ciGreen: boolean): string {
+export function renderReview(job: Job, review: Review, ciGreen: boolean, executions: z.infer<typeof ExecutionRecords> = []): string {
   let body = `Automated independent review of commit \`${job.head}\` (base \`${job.base}\`).\n\nVerdict: ${review.verdict}\nWorthwhile: ${review.worthwhile}\nScope: ${review.scope}\nRecommendation: ${review.recommended_action}\n\n${publicText(review.rationale)}\n\n${publicText(review.body)}\n\nContracts and tests: ${publicText(review.contract_and_test_review)}`;
   for (const b of review.blockers) body += `\n\n${publicText(b.file)}:${b.line}: ${publicText(b.trigger)}\nExpected: ${publicText(b.expected)}\nObserved from code: ${publicText(b.actual)}\nImpact: ${publicText(b.impact)}\nSuggested fix: ${publicText(b.fix)}`;
-  body += `\n\nChecks: ${publicText(review.checks.join('; '))}\nTests were not executed by the reviewer; CI is checked separately.`;
+  body += `\n\nChecks: ${publicText(review.checks.join('; '))}\n${executions.length ? 'Sandbox execution records (CI is checked separately):' : 'No sandbox commands were executed; CI is checked separately.'}`;
+  for (const execution of executions.slice(0, 10)) body += `\n- Revision ${execution.revision.slice(0, 12)}, exit ${execution.exitCode ?? 'unknown'}${execution.limit ? `, ${publicText(execution.limit)}` : ''}: ${publicText(execution.command.slice(0, 500)).replace(/\n/g, ' ')}`;
   if (review.limitations.length) body += `\nLimitations: ${publicText(review.limitations.join('; '))}`;
   if (review.verdict === 'APPROVE') body += ciGreen ? '\n\n@jeqcho, review approved and ci-ok is green for this revision. Please review and merge if you agree.' : '\n\nReview approved. Waiting for ci-ok before requesting a merge.';
   else if (review.verdict === 'ESCALATE') body += `\n\n@jeqcho, ${review.recommended_action === 'CLOSE' ? 'please decide whether to close this PR. ' : 'your decision is needed. '}${publicText(review.decision_needed)}`;

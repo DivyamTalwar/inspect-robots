@@ -1,5 +1,5 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { APP_ID, CHECK_NAME, REPO, SHA, current, renderReview, snapshot, validateReview, type Job } from './common';
+import { APP_ID, CHECK_NAME, ExecutionRecords, REPO, SHA, current, renderReview, snapshot, validateReview, type Job } from './common';
 import { allowedRead, ciGreen, github, installationToken } from './github';
 import { renderHold } from './holds';
 
@@ -30,7 +30,8 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
       conclusion = 'action_required';
     } else {
       const review = validateReview(result);
-      body = renderReview(job, review, await ciGreen(read, job.head));
+      const executions = ExecutionRecords.parse(result && typeof result === 'object' && 'execution_records' in result ? result.execution_records : []);
+      body = renderReview(job, review, await ciGreen(read, job.head), executions);
       conclusion = review.verdict === 'APPROVE' ? 'success' : review.verdict === 'REQUEST_CHANGES' ? 'failure' : 'action_required';
     }
     // Re-check after reads. Check runs always attach to the exact reviewed head.

@@ -59,6 +59,34 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
   async billingHold(): Promise<boolean> {
     return this.ctx.storage.sql.exec("SELECT value FROM settings WHERE key='billing_hold'").toArray().length > 0;
   }
+  async openSession(jobId: string): Promise<string> {
+    if (!await this.job(jobId)) throw new Error('unknown_job');
+    const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+    this.ctx.storage.sql.exec('INSERT INTO settings(key,value) VALUES(?,?)', `session-${token}`, JSON.stringify({ jobId, expires: Date.now() + 25 * 60_000 }));
+    return token;
+  }
+  async session(token: string): Promise<Job | null> {
+    if (!/^[a-f0-9]{64}$/.test(token)) return null;
+    const row = this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM settings WHERE key=?', `session-${token}`).toArray()[0];
+    if (!row) return null;
+    const value = JSON.parse(row.value);
+    if (value.expires < Date.now()) return null;
+    return this.job(value.jobId);
+  }
+  async closeSession(token: string): Promise<void> {
+    this.ctx.storage.sql.exec('DELETE FROM settings WHERE key=?', `session-${token}`);
+  }
+  async sessionFailure(token: string, reason?: string): Promise<string | null> {
+    if (!await this.session(token)) return null;
+    const key = `session-${token}`;
+    const row = this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM settings WHERE key=?', key).one();
+    const session = JSON.parse(row.value);
+    if (reason && ['budget_exhausted', 'billing_hold', 'context_too_large'].includes(reason)) {
+      session.failure = reason;
+      this.ctx.storage.sql.exec('UPDATE settings SET value=? WHERE key=?', JSON.stringify(session), key);
+    }
+    return session.failure ?? null;
+  }
   async warningNeeded(): Promise<boolean> {
     const month = new Date().toISOString().slice(0,7);
     const total = this.ctx.storage.sql.exec<{ amount: number }>('SELECT COALESCE(SUM(amount),0) AS amount FROM charges WHERE month=?', month).one().amount;

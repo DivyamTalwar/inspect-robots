@@ -10,14 +10,14 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
 - Live standard-tier background structured-output request with high reasoning
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
-- Both Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 31 offline review safety tests passed.
+- Worker bundles passed Wrangler dry-run compilation.
+- TypeScript and 33 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
-- Workers Paid enabled by the maintainer. Both Workers deployed successfully.
-- Publisher version: `91dc94ec-2498-42e5-9abd-854bf50c145e`.
-- Reviewer version: `4b18f4e3-d2b7-4d45-b852-59e072a2e61f`.
+- Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
+- Publisher version: `6f74706a-0882-4668-af68-09910d3b1afa`.
+- Reviewer version: `f83cd575-5071-4030-a5cd-d2e3afd60df5`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -51,3 +51,18 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
 No further setup is required for advisory processing.
 Turning the independent review check into a merge requirement is a separate
 rollout decision. Implementation is tracked in PR #455; deployment is already live.
+
+## Codex engine rollout
+
+- Replaced the hand-built model/tool loop with Codex CLI 0.155.1 and a natural-language review policy, using Astra/high.
+- Public source snapshots at the head and merge base are staged in an isolated Cloudflare Sandbox. Codex uses its own diff/search/file/shell tools and fresh session.
+- Added a private model gateway: session-scoped expiring access, pinned model/reasoning, atomic per-request reservations, duplicate-submission prevention, streaming usage settlement. Provider keys remain outside the sandbox.
+- Sandbox has no GitHub credentials and no outbound access except its budgeted Responses proxy. One basic instance; 20-minute CLI limit and independent 22-minute shutdown.
+- Native CLI mock integration passed: initial request, shell execution, continued request containing its tool output, and structured final JSON. No provider credentials or live inference used for that test.
+- Offline Docker test on the trial PR passed 14 focused plugin tests with local package setup and networking disabled.
+- First production CLI attempt stopped at the launcher before model review. Corrected the executable path for Cloudflare's shell.
+- Live native CLI sessions performed multiple model turns, diff inspection and source/context reads. The shared per-head budget then prevented further inference; no completed review verdict was issued.
+- Diagnostic run `230721d16d351acd424c9633cb672b40619b430a06f4d553` confirmed $0.244662 remaining in the conservative head ledger. This is not an invoice total: earlier settlement charged every input token at the non-cached ceiling.
+- Corrected future settlement to credit confirmed cache reads at $1/M, added final-turn budget steering, and preserved budget-stop reasons independently of CLI stderr. Existing charges remain unchanged because historical cache usage was not retained.
+- No further paid trial was started after these fixes. A complete end-to-end verdict on PR #456 remains pending additional authorized trial allowance. The $5/head, $15/PR and $200/month limits remain unchanged.
+- Runner version: `61ee5a32-0f1f-4e23-b46c-f95e42bb31b1`.

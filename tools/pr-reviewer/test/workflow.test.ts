@@ -12,13 +12,14 @@ function setup() {
   const ledger = env.LEDGER.getByName(crypto.randomUUID());
   const read = vi.fn(async (p: string) => {
     if (p === '/pulls/9') return JSON.stringify(pr);
-    if (p.includes('/files?')) return JSON.stringify([{ filename: 'x.py', status: 'modified', patch: '@@ -1 +1 @@\n-old\n+new' }]);
+    if (p.startsWith('/compare/')) return JSON.stringify({ merge_base_commit: { sha: base } });
+    if (p.includes('/files?')) return JSON.stringify([{ filename: 'x.py', status: 'modified', additions: 1, deletions: 1, patch: '@@ -1 +1 @@\n-old\n+new' }]);
     if (p.startsWith('/contents/')) return JSON.stringify({ type: 'file', encoding: 'base64', size: 4, content: btoa('new\n') });
     if (p.startsWith('/git/trees/')) return JSON.stringify({ truncated: false, tree: [] });
     return '[]';
   });
   const create = vi.fn<ReviewerEnv['REVIEW']['create']>();
-  const config = { ENABLED: 'true', GITHUB_WEBHOOK_SECRET: 'test-hook', OPENAI_API_KEY: 'sk-test', LEDGER: { getByName: () => ledger }, PUBLISHER: { read }, REVIEW: { create } };
+  const config = { ENABLED: 'true', GITHUB_WEBHOOK_SECRET: 'test-hook', OPENAI_API_KEY: 'sk-test', LEDGER: { getByName: () => ledger }, PUBLISHER: { read }, RUNNER: { review: vi.fn(async () => JSON.stringify({ exitCode: 1 })) }, REVIEW: { create } };
   const steps: { name: string; options: any }[] = [];
   const step = { do: async (name: string, optionsOrFn: any, callback?: () => Promise<any>) => { steps.push({ name, options: callback ? optionsOrFn : {} }); return (callback ?? optionsOrFn)(); }, sleep: async () => {} } as Pick<WorkflowStep, 'do' | 'sleep'>;
   return { ledger, read, create, config, step, steps };
@@ -61,51 +62,34 @@ describe('webhook dispatch', () => {
   });
 });
 
-describe('bounded model workflow', () => {
-  it('completes a structured review using high reasoning and bounded output', async () => {
-    const s = setup(); const requests: any[] = [];
-    const result = { worthwhile: 'YES', scope: 'ESTABLISHED', verdict: 'APPROVE', recommended_action: 'MERGE', rationale: 'A concrete boundary fix.', blockers: [], contract_and_test_review: 'Invariants preserved.', checks: ['Full source inspected'], limitations: [], sufficient_review: true, decision_needed: '', body: 'The boundary is handled correctly.' };
-    vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {
-      const request = new Request(url, init);
-      if (request.url.endsWith('/input_tokens')) return Response.json({ input_tokens: 100 });
-      if (request.method === 'POST') { requests.push(await request.json()); return Response.json({ id: 'resp_test' }); }
-      return Response.json({ id: 'resp_test', status: 'completed', usage: { input_tokens: 100, output_tokens: 300 }, output: [{ id: 'msg_test', type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: JSON.stringify(result), annotations: [] }] }] });
-    }));
-    expect((await runReview(s.config, job, s.step)).verdict).toBe('APPROVE');
-    expect(requests[0]).toMatchObject({ model: 'gpt-6-astra', reasoning: { effort: 'high' }, service_tier: 'default', background: true, max_output_tokens: 16000 });
-    expect(requests[0].tools.map((t: any) => t.name)).toEqual(['read_file']);
-    expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(5_000_000 - 16_300);
+describe('Codex review lifecycle', () => {
+  it('runs a fresh CLI session with the policy and closes its scoped gateway access', async () => {
+    const s = setup(); await s.ledger.register(job);
+    let capability = '';
+    const result = { worthwhile: 'YES', scope: 'ESTABLISHED', verdict: 'APPROVE', recommended_action: 'MERGE', rationale: 'Concrete boundary fix.', blockers: [], contract_and_test_review: 'Preserved.', checks: [], limitations: [], sufficient_review: true, decision_needed: '', body: 'Verified.' };
+    s.config.RUNNER.review.mockImplementation(async (...args: any[]) => {
+      capability = args[5];
+      expect(await s.ledger.session(capability)).toMatchObject({ id: job.id });
+      expect(args[0]).toBe(head); expect(args[1]).toBe(base);
+      expect(args[3]).toContain('Authority and scope');
+      return JSON.stringify({ exitCode: 0, review: result, executions: [] });
+    });
+    expect((await runReview(s.config as any, job, s.step)).verdict).toBe('APPROVE');
+    expect(await s.ledger.session(capability)).toBeNull();
+    expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_900_000);
   });
-  it('retains the reservation and never retries an ambiguous create call', async () => {
-    const s = setup(); let creates = 0;
-    vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {
-      const request = new Request(url, init);
-      if (request.url.endsWith('/input_tokens')) return Response.json({ input_tokens: 100 });
-      creates++; throw new Error('Connection lost after request submission');
-    }));
-    await expect(runReview(s.config, job, s.step)).rejects.toThrow();
-    expect(creates).toBe(1);
-    expect(await s.ledger.remaining(`9-${head}`, 9)).toBeLessThan(5_000_000);
-    expect(s.steps.find(s => s.name === 'reserve and submit 0')?.options.retries.limit).toBe(0);
+  it('never accepts a partial verdict or retries a failed Codex session', async () => {
+    const s = setup(); await s.ledger.register(job);
+    await expect(runReview(s.config as any, job, s.step)).rejects.toThrow('codex_review_incomplete');
+    expect(s.config.RUNNER.review).toHaveBeenCalledTimes(1);
+    expect(s.steps.find(s => s.name === 'run fresh Codex reviewer')?.options.retries.limit).toBe(0);
   });
-  it('does not call the model when the revision budget is exhausted', async () => {
-    const s = setup();
-    await s.ledger.reserve('prior-run', `9-${head}`, 9, 5_000_000);
-    const calls: string[] = [];
-    vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {
-      const request = new Request(url, init); calls.push(request.url); return Response.json({ input_tokens: 100 }); }));
-    await expect(runReview(s.config, job, s.step)).rejects.toThrow('budget_exhausted');
-    expect(calls).toHaveLength(1); expect(calls[0]).toContain('/input_tokens');
-  });
-  it('settles known usage but never approves an incomplete response', async () => {
-    const s = setup();
-    vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {
-      const request = new Request(url, init);
-      if (request.url.endsWith('/input_tokens')) return Response.json({ input_tokens: 100 });
-      if (request.method === 'POST') return Response.json({ id: 'resp_test' });
-      return Response.json({ id: 'resp_test', status: 'incomplete', usage: { input_tokens: 100, output_tokens: 10 }, output: [] });
-    }));
-    await expect(runReview(s.config, job, s.step)).rejects.toThrow('incomplete_model_response');
-    expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(5_000_000 - 1800);
+  it('preserves the trusted gateway stop even if CLI diagnostics omit its reason', async () => {
+    const s = setup(); await s.ledger.register(job);
+    s.config.RUNNER.review.mockImplementation(async (...args: any[]) => {
+      await s.ledger.sessionFailure(args[5], 'budget_exhausted');
+      return JSON.stringify({ exitCode: 1, failure: 'codex_review_incomplete' });
+    });
+    await expect(runReview(s.config as any, job, s.step)).rejects.toThrow('budget_exhausted');
   });
 });

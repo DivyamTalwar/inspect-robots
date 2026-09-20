@@ -8,7 +8,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {"MODE": "advisory", "ENABLED": "true"},
-  "services": [{"binding": "PUBLISHER", "service": "inspect-robots-review-publisher", "entrypoint": "GithubPublisher"}],
+  "services": [{"binding": "PUBLISHER", "service": "inspect-robots-review-publisher", "entrypoint": "GithubPublisher"}, {"binding": "RUNNER", "service": "inspect-robots-review-runner", "entrypoint": "CodeRunner"}],
   "durable_objects": {"bindings": [{"name": "LEDGER", "class_name": "ReviewLedger"}]},
   "migrations": [{"tag": "v1", "new_sqlite_classes": ["ReviewLedger"]}],
   "workflows": [{"binding": "REVIEW", "name": "inspect-robots-review", "class_name": "ReviewWorkflow"}],

@@ -2,10 +2,11 @@ import { importPKCS8, SignJWT } from 'jose';
 import { boundedText, REPO } from './common';
 
 export function allowedRead(path: string): boolean {
+  if (/^\/compare\/[a-f0-9]{40}\.\.\.[a-f0-9]{40}\?per_page=1$/.test(path)) return true;
   if (path.includes('..') || path.includes('\\') || /[\r\n#]/.test(path)) return false;
   const url = new URL(`https://api.github.com/repos/${REPO}${path}`);
   return url.origin === 'https://api.github.com' && url.pathname.startsWith(`/repos/${REPO}/`) &&
-    /^\/(pulls(?:\/\d+(?:\/(?:files|commits))?)?|issues\/\d+(?:\/comments)?|contents\/[^?]+|git\/trees\/[a-f0-9]{40}|commits\/[a-f0-9]{40}\/(?:check-runs|status)|actions\/runs(?:\/\d+)?)($|\?)/.test(path);
+    /^\/(pulls(?:\/\d+(?:\/(?:files|commits))?)?|issues\/\d+(?:\/comments)?|contents\/[^?]+|compare\/[a-f0-9]{40}\.\.\.[a-f0-9]{40}|git\/trees\/[a-f0-9]{40}|commits\/[a-f0-9]{40}\/(?:check-runs|status)|actions\/runs(?:\/\d+)?)($|\?)/.test(path);
 }
 
 export async function github(token: string, path: string, method = 'GET', body?: unknown): Promise<any> {
