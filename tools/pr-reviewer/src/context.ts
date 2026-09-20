@@ -8,7 +8,8 @@ export function safePath(path: string): boolean {
 export async function readFile(read: Read, job: Job, path: string, revision: 'base' | 'head'): Promise<FileEvidence> {
   if (!safePath(path)) throw new Error('invalid_file_path');
   const data = await read(`/contents/${path.split('/').map(encodeURIComponent).join('/')}?ref=${job[revision]}`);
-  if (data.type !== 'file' || data.encoding !== 'base64' || data.size > 100_000 || typeof data.content !== 'string') throw new Error('file_not_inspectable');
+  if (data.size > 100_000) throw new Error(`file_too_large:${JSON.stringify({ path, size: data.size })}`);
+  if (data.type !== 'file' || data.encoding !== 'base64' || typeof data.content !== 'string') throw new Error('file_not_inspectable');
   const bytes = Uint8Array.from(atob(data.content.replace(/\s/g, '')), c => c.charCodeAt(0));
   // Preserve a BOM so a nonempty file cannot masquerade as an empty addition.
   const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes);

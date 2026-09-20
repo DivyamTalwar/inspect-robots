@@ -2,6 +2,7 @@ import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from 'cloud
 import { boundedText, current, digest, INSTALLATION_ID, JAY_ID, POLICY_VERSION, REPO, snapshot, validateReview, verifySignature, type Job } from './common';
 import { ciGreen } from './github';
 import { runReview } from './review';
+import { holdReason } from './holds';
 export { ReviewLedger } from './ledger';
 
 export type WebhookEnvironment = Pick<ReviewerEnv, 'ENABLED' | 'GITHUB_WEBHOOK_SECRET'> & {
@@ -64,7 +65,7 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
       // Never log external response bodies, prompts, code, headers or credentials.
       console.error(JSON.stringify({ job: job.id, status: 'held', error: error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'review_failed' }));
       await step.do('record held', () => ledger.finish(job.id, 'held'));
-      await step.do('publish hold', () => this.env.PUBLISHER.publish(job, null, 'held'));
+      await step.do('publish hold', () => this.env.PUBLISHER.publish(job, holdReason(error), 'held'));
     }
   }
 }

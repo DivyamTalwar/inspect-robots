@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Both Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 28 offline review safety tests passed.
+- TypeScript and 31 offline review safety tests passed.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. Both Workers deployed successfully.
-- Publisher version: `59b0c1ce-584e-4ba1-944b-56bdaf4eead9`.
-- Reviewer version: `c44d5b76-caad-4c3f-bdae-14b95d1ec895`.
+- Publisher version: `91dc94ec-2498-42e5-9abd-854bf50c145e`.
+- Reviewer version: `4b18f4e3-d2b7-4d45-b852-59e072a2e61f`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -43,6 +43,10 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   `679ba5b31f920ab2086ff632283630c0520279906ccaa88b` published a held result
   and tagged Jay. Neither trial reached model submission or budget reservation;
   no model-review verdict was produced. PR #456 remains open with green CI.
+- Hold notices now include an allowlisted reason, safe file-size details when
+  available, a next step and a run reference. Budget, context-size and model
+  failures have distinct explanations. Raw exceptions and provider responses
+  never become public comment text.
 
 No further setup is required for advisory processing.
 Turning the independent review check into a merge requirement is a separate

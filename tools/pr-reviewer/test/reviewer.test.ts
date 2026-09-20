@@ -5,6 +5,7 @@ import { current, publicText, renderReview, validateReview, verifySignature, typ
 import { allowedRead, ciGreen, github } from '../src/github';
 import { collectContext, readFile, safePath } from '../src/context';
 import { GithubPublisher } from '../src/publisher';
+import { holdReason, renderHold } from '../src/holds';
 import { handleWebhook } from '../src/worker';
 import type { ReviewLedger } from '../src/ledger';
 
@@ -141,7 +142,33 @@ describe('untrusted input and complete context', () => {
     }
   });
   it('retains the per-file size limit', async () => {
-    await expect(readFile(async () => ({ type: 'file', encoding: 'base64', size: 100_001, content: '' }), job, 'uv.lock', 'head')).rejects.toThrow('file_not_inspectable');
+    await expect(readFile(async () => ({ type: 'file', encoding: 'base64', size: 100_001, content: '' }), job, 'uv.lock', 'head')).rejects.toThrow('file_too_large:');
+  });
+});
+
+describe('actionable hold notices', () => {
+  it('preserves safe file details through an Error message round-trip', async () => {
+    let failure: unknown;
+    try { await readFile(async () => ({ size: 524568 }), job, 'uv.lock', 'head'); } catch (error) { failure = new Error((error as Error).message); }
+    const body = renderHold(job, holdReason(failure));
+    expect(body).toContain('`uv.lock` is 524,568 bytes');
+    expect(body).toContain('limit is 100,000 bytes');
+    expect(body).toContain('large-file handling');
+    expect(body).not.toContain('check the reviewer service configuration');
+  });
+  it('distinguishes exhausted budgets from file limits', () => {
+    const body = renderHold(job, holdReason(new Error('budget_exhausted')));
+    expect(body).toContain('remaining review budget');
+    expect(body).not.toContain('large-file');
+    expect(body).not.toContain('no model charges');
+  });
+  it('never publishes arbitrary errors or unsafe diagnostic fields', () => {
+    for (const error of [new Error('Authorization: Bearer sk-private'), new Error('file_too_large:{"path":"@victim <img>","size":42}'), new Error('file_too_large:malformed')]) {
+      const body = renderHold(job, holdReason(error));
+      expect(body).not.toMatch(/sk-private|@victim|<img>|malformed/);
+      expect(body).toContain('no verdict issued');
+    }
+    expect(renderHold(job, { code: 'review_failed', path: '@victim' })).not.toContain('@victim');
   });
 });
 

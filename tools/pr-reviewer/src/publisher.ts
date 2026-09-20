@@ -1,6 +1,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import { APP_ID, CHECK_NAME, REPO, SHA, current, renderReview, snapshot, validateReview, type Job } from './common';
 import { allowedRead, ciGreen, github, installationToken } from './github';
+import { renderHold } from './holds';
 
 export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
   async read(path: string): Promise<string> {
@@ -22,7 +23,7 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
     if (notice === 'started') {
       body = `Independent review is running for ${job.head}.`;
     } else if (notice === 'held') {
-      body = `Review of commit \`${job.head}\` is incomplete. @jeqcho, please check the reviewer service configuration, budget and run status. No approval was issued.`;
+      body = renderHold(job, result);
       conclusion = 'action_required';
     } else if (notice === 'budget-warning') {
       body = '@jeqcho, this month’s review spending and outstanding reservations have reached $160 of the $200 budget. The service will pause when the remaining allowance is insufficient.';
