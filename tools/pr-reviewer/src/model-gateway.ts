@@ -43,7 +43,7 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
     if (maxOutput < 2000) return stop('budget_exhausted', 'Review budget exhausted', 429);
     if (allowance < 2 * inputReservation + 600_000) {
       params.tool_choice = 'none';
-      params.input[params.input.length - 1].content = 'Final review turn: the remaining budget cannot safely cover more investigation. Return the review JSON now. Use ESCALATE if material evidence is missing; never invent findings or claim a complete review.';
+      params.input[params.input.length - 1].content = 'Final review turn: budget cannot safely cover more investigation. Return review JSON now. Name exact unchecked files or behavior, the budget limit, and the next check. Escalate material gaps; do not blame missing scope approval or invent findings.';
     }
     const charge = `${job.id}-codex-${await digest(token + body)}`;
     if (!await ledger.reserve(charge, `${job.pr}-${job.head}`, job.pr, inputReservation + maxOutput * 50)) return new Response('Review budget or duplicate request guard', { status: 409 });

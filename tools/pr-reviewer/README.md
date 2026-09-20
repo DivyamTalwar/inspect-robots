@@ -2,7 +2,9 @@
 
 Advisory review service for `robocurve/inspect-robots`, hosted in Robocurve's
 Cloudflare account. It uses `gpt-6-astra` with high reasoning and a new context
-for each run. Scope and usefulness are assessed before correctness. The deployed,
+for each run. Scope, usefulness and correctness are assessed separately. Missing
+prior approval does not stop technical review or automatically trigger escalation.
+The deployed,
 versioned [policy](src/policy.md) incorporates the maintainer's review guidance;
 PR content cannot replace it.
 
@@ -25,6 +27,13 @@ intent and personal characteristics are never grounds for a finding.
 The bot does not merge, close, label, submit formal approving reviews, edit code,
 approve Actions, or modify branch rules. Its named check is initially advisory.
 Making this check required needs a separate maintainer decision.
+
+Review instructions prioritize changed code and tests, track per-file coverage,
+page large diffs, and retrieve surrounding code only when needed. Product questions
+name the actual maintenance or design tradeoff. Incomplete reviews identify exact
+unchecked files or behavior, the reason, and the next verification step. Review
+commands and earlier bot verdicts are excluded from discussion evidence; verified
+maintainer comments are evidence whose actual meaning must still be read.
 
 ## Architecture and credentials
 

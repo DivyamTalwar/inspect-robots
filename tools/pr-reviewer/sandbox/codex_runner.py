@@ -64,11 +64,16 @@ def main():
     prompt = (
         "Review the PR described in /workspace/review/context.json using the supplied policy. "
         "The complete immutable head snapshot is /workspace/review/head and its merge-base "
-        "snapshot is /workspace/review/base. Start with git diff --no-index --stat and then "
-        "git diff --no-index between those directories (exit 1 means differences, not failure). "
-        "Read the discussion context and base CLAUDE.md. Inspect relevant source, callers and "
-        "tests and run focused checks when useful. Assess scope and usefulness as well as "
-        "correctness. Return the requested review JSON. Do not modify GitHub or contact anyone."
+        "snapshot is /workspace/review/base. Start with git diff --no-index --stat and "
+        "--name-status between those directories (exit 1 means differences, not failure). "
+        "Track changed-file coverage and inspect per-file diffs in bounded batches; do not "
+        "dump the whole directory diff or context JSON. Read the PR description, relevant "
+        "discussion and base CLAUDE.md, then prioritize changed code, tests and focused "
+        "reproductions. Investigate correctness even if a product decision is pending. "
+        "Assess usefulness and concrete maintenance tradeoffs without requiring a separate "
+        "approval comment for routine in-scope work. Return the requested review JSON, "
+        "naming any exact remaining checks and why they could not be completed. "
+        "Do not modify GitHub or contact anyone."
     )
     args = [
         "codex",

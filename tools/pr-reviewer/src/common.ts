@@ -8,18 +8,18 @@ export const CHECK_NAME = 'Independent PR review';
 export const MODEL = 'gpt-6-astra';
 export const SHA = /^[a-f0-9]{40}$/;
 export const LIMITS = { review: 5_000_000, pr: 15_000_000, month: 200_000_000, warn: 160_000_000 };
-export const POLICY_VERSION = '1';
+export const POLICY_VERSION = '2';
 
 export const ReviewSchema = z.object({
   worthwhile: z.enum(['YES', 'NO', 'NEED_REVIEWER']),
-  scope: z.enum(['ESTABLISHED', 'NEED_REVIEWER']),
+  scope: z.enum(['ESTABLISHED', 'NEED_REVIEWER']).describe('Established project scope does not require a separate approval comment. NEED_REVIEWER requires a concrete product, maintenance or design decision, not merely absent prior approval.'),
   verdict: z.enum(['APPROVE', 'REQUEST_CHANGES', 'ESCALATE']),
   recommended_action: z.enum(['MERGE', 'REVISE', 'CLOSE', 'NEEDS_DECISION']),
   rationale: z.string().max(360).describe('TL;DR in one or two short sentences: what this PR changes and the main reason for the verdict. No background narrative or repeated verdict label.'),
   blockers: z.array(z.object({ file: z.string(), line: z.number().int(), trigger: z.string(), expected: z.string(), actual: z.string(), impact: z.string(), fix: z.string() })),
   contract_and_test_review: z.string(),
   checks: z.array(z.string()),
-  limitations: z.array(z.string()),
+  limitations: z.array(z.string()).describe('For each material gap, identify the exact files, behavior or checks not verified, why, and the next verification step. Separate incomplete inspection from unavailable hardware or services.'),
   sufficient_review: z.boolean(),
   decision_needed: z.string().max(500).describe('For escalation, the concrete decision and options in at most two short sentences. Otherwise empty.'),
   body: z.string(),

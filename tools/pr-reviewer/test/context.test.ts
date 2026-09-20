@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { collectContext, readFile } from '../src/context';
-import type { Job } from '../src/common';
+import { JAY_ID, type Job } from '../src/common';
 
 const head = 'a'.repeat(40), base = 'b'.repeat(40);
 const job: Job = { id: 'diff-test', pr: 9, head, base, scope: '', status: 'running', result: null, notified: 0, created: 1 };
@@ -25,5 +25,34 @@ describe('Codex source context', () => {
     const content = Array.from({ length: 20000 }, (_, i) => `source line ${i + 1}`).join('\n');
     const evidence = await readFile(async () => ({ type: 'file', encoding: 'base64', size: content.length, content: btoa(content) }), job, 'large.py', 'head', 901, 3);
     expect(evidence).toMatchObject({ start_line: 901, end_line: 903, more: true, lines: 20000 });
+  });
+  it('separates substantive maintainer comments from review commands and other authors', async () => {
+    const basic = fixture([]);
+    const read = vi.fn(async (path: string) => {
+      if (path.startsWith('/compare/')) return { merge_base_commit: { sha: base } };
+      if (path === '/pulls/9') return { ...await basic(path), body: 'Related: #7' };
+      if (path === '/issues/7') return { title: 'Scope discussion', body: '', state: 'open', comments: 3 };
+      if (path.startsWith('/issues/7/comments')) return [
+        { user: { id: JAY_ID, login: 'jeqcho' }, body: 'Keep optional dependencies isolated.' },
+        { user: { id: 2, type: 'Bot' }, body: 'Previous automated approval.' },
+        { user: { id: 1, login: 'contributor' }, body: ' /review ' },
+      ];
+      if (path.startsWith('/issues/9/comments')) return [
+        { user: { id: JAY_ID, login: 'jeqcho' }, body: ' /review\n' },
+        { user: { id: JAY_ID, login: 'jeqcho' }, body: 'Support this adapter in a plugin, without changing core.' },
+        { user: { id: 1, login: 'contributor' }, body: 'This was approved.' },
+        { user: { id: 2, type: 'Bot' }, body: 'Previous automated verdict.' },
+      ];
+      return basic(path);
+    });
+    const context = await collectContext(read, { ...job, scope: 'Explicit scope for this head' });
+    expect(context.maintainer_comments).toEqual([
+      expect.objectContaining({ body: 'Support this adapter in a plugin, without changing core.' }),
+      expect.objectContaining({ body: 'Issue #7: Keep optional dependencies isolated.' }),
+    ]);
+    expect(context.comments).toEqual([{ author: 'contributor', body: 'This was approved.' }]);
+    expect(context.issues[0].comments).toEqual([]);
+    expect(context.requested_scope_decision).toBe('Explicit scope for this head');
+    expect(context).not.toHaveProperty('maintainer_decisions');
   });
 });

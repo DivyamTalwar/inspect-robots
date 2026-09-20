@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 34 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
+- TypeScript and 35 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
-- Publisher version: `75e8bd49-206d-47ba-8283-7066e1f72c42`.
-- Reviewer version: `1d836ed3-3b91-4db1-b924-8f527f143888`.
+- Publisher version: `58beaa09-97d5-4104-b99b-98ae0fffaa3e`.
+- Reviewer version: `7fa3b5f7-fac0-4712-954f-2025d5d42f2a`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -65,7 +65,7 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Diagnostic run `230721d16d351acd424c9633cb672b40619b430a06f4d553` confirmed $0.244662 remaining in the conservative head ledger. This is not an invoice total: earlier settlement charged every input token at the non-cached ceiling.
 - Corrected future settlement to credit confirmed cache reads at $1/M, added final-turn budget steering, and preserved budget-stop reasons independently of CLI stderr. Existing charges remain unchanged because historical cache usage was not retained.
 - No further paid trial was started after these fixes. A complete end-to-end verdict on PR #456 remains pending additional authorized trial allowance. The $5/head, $15/PR and $200/month limits remain unchanged.
-- Runner version: `61ee5a32-0f1f-4e23-b46c-f95e42bb31b1`.
+- Runner version: `a9422b3f-3fa8-439c-9bc2-f410a43c3130`.
 
 ## Authorized trial budget exception
 
@@ -82,3 +82,11 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Verdict comments start with a bounded, one- or two-sentence TL;DR and the requested action. Supporting findings, test results and command records are in an expandable section. Incomplete-run notices also start with a TL;DR.
 - The prompt prohibits repeating the summary, scope decision and test results across paragraphs. Existing published reviews were not rewritten and no paid review was triggered for this presentation change.
 - TypeScript and all 34 reviewer tests passed.
+
+## Review policy version 2
+
+- Missing prior approval is not an automatic scope blocker. Technical review continues while a concrete product decision is pending; routine work can fit established scope without a separate approval comment.
+- Product escalations must state the actual maintenance/design choice. Incomplete reviews must identify unchecked files or behavior, the limiting reason and the next check. Internal authority terminology is excluded from public prose.
+- The CLI now starts with a changed-file inventory and bounded per-file diffs, prioritizes changed code/tests, tracks coverage, and avoids repeated full-file/context dumps.
+- Verified maintainer comments are separated from other discussion, without calling every comment a decision. Bare review commands and prior bot verdicts are excluded, including linked discussions.
+- TypeScript, 35 offline reviewer tests, and Python launcher lint/format checks passed. No paid rerun was requested for this policy update; future behavior has not yet been evaluated in a live review.
