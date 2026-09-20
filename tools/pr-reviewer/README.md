@@ -130,3 +130,11 @@ Tests use the real local Workers/SQLite runtime with all network calls mocked.
 They cover concurrent spending, replay, head changes, untrusted inputs, decision
 consistency, publication boundaries and ambiguous model failures. CI runs them
 without production credentials.
+
+Hosting estimate: a few hundred reviews per month should fit the included
+Workers, Workflows and SQLite allowances, so the expected incremental hosting
+charge is $0 beyond the $5 base subscription. Allow $1-$2 headroom pending real
+usage; this is an estimate, not a hard hosting cap. Quotas are shared across the
+account. Workflows include 500,000 steps and 1 GB-month of state; API waiting and
+step sleeps do not incur Workflow CPU time. See [Workflow pricing](https://developers.cloudflare.com/workflows/reference/pricing/)
+and [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
