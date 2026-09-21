@@ -40,7 +40,10 @@ function jwt(app) {
   return `${payload}.${sign("RSA-SHA256", Buffer.from(payload), createPrivateKey(app.pem)).toString("base64url")}`;
 }
 async function api(path, token, method = "GET", body) {
-  const response = await fetch(`https://api.github.com${path}`, {
+  // Assign only the pathname: a callback-derived value cannot change the origin.
+  const url = new URL("https://api.github.com");
+  url.pathname = path;
+  const response = await fetch(url, {
     method,
     headers: {
       ...headers,

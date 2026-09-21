@@ -56,6 +56,7 @@ for attempt in blocked:
  except PermissionError: pass
  else: raise AssertionError('untrusted tool crossed filesystem boundary')
 assert not any(k.startswith(('CODEX_EXEC_SERVER', 'OPENAI_')) for k in os.environ)
+assert 'ISSUE_GATEWAY_TOKEN' not in os.environ
 clients, readable = [], []
 for item in pathlib.Path('/proc').iterdir():
  if not item.name.isdigit(): continue
@@ -98,7 +99,10 @@ print('ISOLATION_OK')
                     pass
 
                 def do_POST(self):
-                    if self.path != f"/{secret}/responses":
+                    if (
+                        self.path != "/responses"
+                        or self.headers.get("Authorization") != f"Bearer {secret}"
+                    ):
                         self.send_error(403)
                         return
                     payload = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
@@ -250,7 +254,7 @@ print('ISOLATION_OK')
                         runner,
                         "write_client_config",
                         side_effect=lambda req, path: original_config(
-                            req, path, f"http://127.0.0.1:{server.server_port}/{secret}"
+                            req, path, f"http://127.0.0.1:{server.server_port}"
                         ),
                     ),
                 ):
@@ -260,6 +264,7 @@ print('ISOLATION_OK')
                 server.server_close()
             self.assertEqual(output["exitCode"], 0, output)
             self.assertEqual(output["result"], fixture)
+            self.assertNotIn(secret, (workspace / "home/.codex/config.toml").read_text())
             self.assertEqual(len(captured), 2)
             tool_outputs = [
                 i for i in captured[-1]["input"] if i.get("type") == "custom_tool_call_output"

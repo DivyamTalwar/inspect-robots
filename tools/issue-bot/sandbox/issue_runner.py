@@ -432,11 +432,11 @@ def codex_args(request, workspace):
     return [*args, prompt]
 
 
-def write_client_config(request, workspace, base_url=None):
-    """Keep the model capability out of argv and inaccessible to repository tools.
+def write_client_config(_request, workspace, base_url=None):
+    """Write only the constant gateway URL and environment-key name to disk.
 
-    The only loaded user config is this generated file inside the client's private
-    home. Native exec-server runs under TOOL_UID and cannot read that directory.
+    The stage capability exists only in the Codex client's environment. Native
+    exec-server has a separate environment and Unix identity.
     """
     codex_home = workspace / "home" / ".codex"
     codex_home.mkdir()
@@ -445,8 +445,8 @@ def write_client_config(request, workspace, base_url=None):
     path = codex_home / "config.toml"
     path.write_text(
         "[model_providers.issue_gateway]\nbase_url = "
-        + json.dumps(base_url or f"http://issue-model.local/{request['token']}")
-        + "\n"
+        + json.dumps(base_url or "http://issue-model.local")
+        + '\nenv_key = "ISSUE_GATEWAY_TOKEN"\n'
     )
     os.chown(path, 0, AGENT_UID)
     path.chmod(0o440)
@@ -562,7 +562,11 @@ def run_stage(request, workspace):
         process = subprocess.Popen(
             codex_args(request, workspace),
             cwd=source,
-            env={**environment, "CODEX_EXEC_SERVER_URL": server_url},
+            env={
+                **environment,
+                "CODEX_EXEC_SERVER_URL": server_url,
+                "ISSUE_GATEWAY_TOKEN": request["token"],
+            },
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             start_new_session=True,

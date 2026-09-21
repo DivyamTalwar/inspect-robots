@@ -12,7 +12,7 @@ import tarfile
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import issue_runner as runner
 
@@ -181,6 +181,51 @@ class RunnerTest(unittest.TestCase):
                     )
                 ),
             )
+
+    def test_client_config_contains_only_constant_url_and_env_key(self):
+        (self.root / "home").mkdir()
+        request = {"token": "b" * 64, "checkpointToken": "c" * 64}
+        with patch.object(runner.os, "chown"):
+            runner.write_client_config(request, self.root)
+        config = (self.root / "home/.codex/config.toml").read_text()
+        self.assertIn('base_url = "http://issue-model.local"', config)
+        self.assertIn('env_key = "ISSUE_GATEWAY_TOKEN"', config)
+        self.assertNotIn(request["token"], config)
+        self.assertNotIn(request["checkpointToken"], config)
+
+    def test_capability_is_added_only_to_client_after_starting_tools(self):
+        request = {"kind": "triage", "token": "b" * 64, "checkpointToken": "c" * 64}
+        events = []
+        server, process, selector = MagicMock(), MagicMock(), MagicMock()
+        process.returncode = 0
+        selector.get_map.return_value = {}
+
+        def start_tools(_workspace, _source, environment):
+            self.assertNotIn("ISSUE_GATEWAY_TOKEN", environment)
+            self.assertNotIn(request["token"], json.dumps(environment))
+            events.append("tools")
+            return server, "ws://127.0.0.1:12345"
+
+        def start_client(args, **kwargs):
+            self.assertEqual(events, ["tools"])
+            self.assertEqual(kwargs["env"]["ISSUE_GATEWAY_TOKEN"], request["token"])
+            self.assertNotIn(request["token"], " ".join(args))
+            self.assertNotIn(request["checkpointToken"], json.dumps(kwargs["env"]))
+            events.append("client")
+            return process
+
+        with (
+            patch.object(runner, "stage_workspace"),
+            patch.object(runner, "prepare_packages", return_value=[]),
+            patch.object(runner, "write_client_config"),
+            patch.object(runner, "start_tool_server", side_effect=start_tools),
+            patch.object(runner.subprocess, "Popen", side_effect=start_client),
+            patch.object(runner.selectors, "DefaultSelector", return_value=selector),
+            patch.object(runner, "read_result", return_value={}),
+            patch.object(runner, "kill_user"),
+        ):
+            self.assertEqual(runner.run_stage(request, self.root)["exitCode"], 0)
+        self.assertEqual(events, ["tools", "client"])
 
     def test_native_shell_wrappers_preserve_the_actual_script(self):
         commands = {

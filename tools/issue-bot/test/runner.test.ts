@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { validateRequest } from "../src/sandbox";
+import { describe, expect, it, vi } from "vitest";
+import { modelOutbound, validateRequest } from "../src/sandbox";
 import type { StageRequest } from "../src/contracts";
 
 function request(): StageRequest {
@@ -153,5 +153,77 @@ describe("fixed Container supervisor controller", () => {
       typeof IssueSandbox
     >;
     expect((await box.fetch()).status).toBe(404);
+  });
+});
+
+describe("client-only gateway bearer capability", () => {
+  const capability = "a".repeat(64);
+  function gateway() {
+    return {
+      MODEL: {
+        respond: vi.fn(async () => new Response("response")),
+        deliverCheckpoint: vi.fn(async () => undefined),
+        checkpoint: vi.fn(async () => undefined),
+        completed: vi.fn(async () => false),
+      },
+    };
+  }
+  it("accepts only exact bearer capability on the fixed responses route", async () => {
+    const env = gateway();
+    const response = await modelOutbound(
+      new Request("http://issue-model.local/responses", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${capability}` },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(env.MODEL.respond).toHaveBeenCalledWith(capability, "{}");
+  });
+  it.each([
+    "",
+    "Bearer wrong",
+    `Bearer ${capability} extra`,
+    `Basic ${capability}`,
+    `Bearer ${capability}, Bearer ${capability}`,
+  ])("rejects malformed authentication %s", async (authorization) => {
+    const env = gateway();
+    const response = await modelOutbound(
+      new Request("http://issue-model.local/responses", {
+        method: "POST",
+        headers: { Authorization: authorization },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(response.status).toBe(403);
+    expect(env.MODEL.respond).not.toHaveBeenCalled();
+  });
+  it("rejects the old capability-in-URL model route", async () => {
+    const env = gateway();
+    const response = await modelOutbound(
+      new Request(`http://issue-model.local/${capability}/responses`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${capability}` },
+        body: "{}",
+      }),
+      env,
+    );
+    expect(response.status).toBe(403);
+    expect(env.MODEL.respond).not.toHaveBeenCalled();
+  });
+  it("retains the separate trusted checkpoint receipt route", async () => {
+    const env = gateway();
+    const response = await modelOutbound(
+      new Request(`http://issue-model.local/${capability}/checkpoint`, {
+        method: "POST",
+        body: "{}",
+      }),
+      env,
+    );
+    expect(response.status).toBe(200);
+    expect(env.MODEL.deliverCheckpoint).toHaveBeenCalledWith(capability, "{}");
+    expect(env.MODEL.respond).not.toHaveBeenCalled();
   });
 });

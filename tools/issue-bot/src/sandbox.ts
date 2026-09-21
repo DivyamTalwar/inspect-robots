@@ -148,23 +148,33 @@ export class IssueSandbox extends Container<IssueRunnerEnv> {
     await this.destroy();
   }
 }
-IssueSandbox.outboundByHost = {
-  "issue-model.local": async (request, env) => {
-    const match = /^\/([a-f0-9]{64})\/(responses|checkpoint)$/.exec(
-      new URL(request.url).pathname,
+/** Fixed model route uses a client-only bearer capability, never a URL token. */
+export async function modelOutbound(
+  request: Request,
+  env: Pick<IssueRunnerEnv, "MODEL">,
+): Promise<Response> {
+  const path = new URL(request.url).pathname;
+  if (request.method !== "POST")
+    return new Response("Not allowed", { status: 403 });
+  const checkpoint = /^\/([a-f0-9]{64})\/checkpoint$/.exec(path);
+  if (checkpoint) {
+    await env.MODEL.deliverCheckpoint(
+      checkpoint[1],
+      await boundedText(request, 1_500_000),
     );
-    if (request.method !== "POST" || !match)
-      return new Response("Not allowed", { status: 403 });
-    if (match[2] === "checkpoint") {
-      await env.MODEL.deliverCheckpoint(
-        match[1],
-        await boundedText(request, 1_500_000),
-      );
-      return new Response("Saved");
-    }
-    return env.MODEL.respond(match[1], await boundedText(request, 3_000_000));
-  },
-};
+    return new Response("Saved");
+  }
+  const authorization = /^Bearer ([a-f0-9]{64})$/.exec(
+    request.headers.get("Authorization") ?? "",
+  );
+  if (path !== "/responses" || !authorization)
+    return new Response("Not allowed", { status: 403 });
+  return env.MODEL.respond(
+    authorization[1],
+    await boundedText(request, 3_000_000),
+  );
+}
+IssueSandbox.outboundByHost = { "issue-model.local": modelOutbound };
 
 async function archive(sha: string): Promise<string> {
   const response = await fetch(

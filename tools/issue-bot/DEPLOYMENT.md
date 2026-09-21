@@ -40,15 +40,25 @@ coordinator `44f70a65-7dd3-4f4f-ba6a-c65819718bcc`, runner
 `4752dab9-189d-49be-a809-33a09a339abe`, image digest
 `sha256:ac63911a71227f681afd8ca1d1d0ed48328075d788a9f83389f97df0ac277819`.
 
+Final client-only environment authentication runner:
+`eade74f4-0259-4bc2-80ba-a7b711d16364`, image digest
+`sha256:08b7f1d3528c7349a7967eeb1432ed183c93fd56b4c2f0132e1e60203ba57fdd`.
+Coordinator remains disabled at the version above.
+
 ## Verification and outstanding rollout
 
 Core regression suite: 1,720 passed, six optional rerun-sdk skips, 100% coverage.
-Core Ruff and mypy passed. Bot TypeScript and all 49 Worker tests passed. All 24
+Core Ruff and mypy passed. Bot TypeScript and all 57 Worker tests passed. All 26
 Python tests passed in the Linux container with external networking disabled,
 including the real native Codex fixture using synthetic responses. The fixture
 verified that native command records normalize to the original shell script.
 Python Ruff checks passed. The final independent functional reviewer approved
-after the command-evidence normalization correction.
+after the command-evidence normalization correction and client-only environment
+authentication change. The capability is absent from the Codex configuration
+file, process arguments and tool environment. Initial GitHub CI exposed a test
+interpreter path assumption; using the active interpreter resolved it and the
+issue-bot job passed. CodeQL also prompted explicit read-only CI permissions and
+fixed-origin URL construction in the App setup helper.
 
 Credential upload is pending explicit approval for the named Cloudflare secret
 destinations following automatic approval review. Intake remains disabled.
