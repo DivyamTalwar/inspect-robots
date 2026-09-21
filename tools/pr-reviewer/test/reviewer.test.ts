@@ -69,12 +69,12 @@ describe('budget ledger in the Workers runtime', () => {
   it('limits the authorized trial exception to its exact PR head and preserves the PR ceiling', async () => {
     const ledger = env.LEDGER.getByName(crypto.randomUUID());
     const revision = '456-696fbaa9a00d7c345a81dd179fa10934f51ade89';
-    expect(await ledger.remaining(revision, 456)).toBe(10_000_000);
+    expect(await ledger.remaining(revision, 456)).toBe(15_000_000);
     expect(await ledger.remaining(revision, 457)).toBe(5_000_000);
     expect(await ledger.remaining(`456-${head}`, 456)).toBe(5_000_000);
-    const accepted = await Promise.all(Array.from({ length: 12 }, (_, i) => ledger.reserve(`trial-${i}`, revision, 456, 1_000_000)));
-    expect(accepted.filter(Boolean)).toHaveLength(10);
-    expect(await ledger.reserve('another-head', `456-${head}`, 456, 5_000_000)).toBe(true);
+    const accepted = await Promise.all(Array.from({ length: 17 }, (_, i) => ledger.reserve(`trial-${i}`, revision, 456, 1_000_000)));
+    expect(accepted.filter(Boolean)).toHaveLength(15);
+    expect(await ledger.reserve('another-head', `456-${head}`, 456, 1)).toBe(false);
     expect(await ledger.reserve('pr-ceiling', `456-${base}`, 456, 1)).toBe(false);
   });
   it('reports each run separately while retaining cumulative revision spending', async () => {

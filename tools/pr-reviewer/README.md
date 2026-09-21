@@ -94,7 +94,7 @@ so every comment names its exact revision and checks attach to that head only.
 | All reviews per UTC calendar month | $200 |
 | Monthly warning to Jay | $160 |
 
-The maintainer authorized a $10 cap for trial PR #456 at head
+The maintainer authorized a $15 cap for trial PR #456 at head
 `696fbaa9a00d7c345a81dd179fa10934f51ade89`. The deployment-only
 `REVIEW_HEAD_LIMITS_JSON` setting records that exception in microdollars. It
 applies only to that exact PR/head, preserves existing charges and cannot exceed

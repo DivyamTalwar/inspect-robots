@@ -17,7 +17,7 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
 - Publisher version: `37cd6349-4e41-4423-9e30-1c9c438af6a9`.
-- Reviewer version: `6a045f95-f833-40ff-a7d1-043219329579`.
+- Reviewer version: `5df86445-18bc-490f-a6c1-e21902a51080`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -101,3 +101,9 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Verified: TypeScript and 39 reviewer tests; native Codex two-turn shell/structured-output smoke test; automatic package installation and all 131 Jev plugin tests in an offline AMD64 container, with one existing degenerate-calibration warning; Ruff, formatting, mypy and 1,720 core tests at 100% coverage (six optional rerun-sdk skips).
 - Live health confirms policy 3. Read-only diagnostic budget-audit-policy3 confirmed latest run 241f23cdf3337ce7a29fa055107c00cb83c95e4d046ba9d3 booked $0.568857 for four model calls plus $0.10 sandbox allowance, with no unresolved model reservations.
 - The current PR456 head has used $8.974748 of its authorized $10 cumulative cap; $1.025252 remains. No new paid review was launched because that is below the admission floor. No limits or historical charges were reset. Policy 3 has not yet produced a new live model review.
+
+## Authorized policy 3 live verification
+
+- The maintainer authorized increasing only PR456 head 696fbaa9a00d7c345a81dd179fa10934f51ade89 from $10 to $15 cumulative for a fresh verification run. The $15 PR lifetime and $200 monthly caps, and other heads' $5 default, remain unchanged. Prior charges remain intact; the run starts with $6.025252 available.
+- TypeScript and all 39 reviewer tests passed, including concurrent reservations against the updated exception and refusal to exceed the PR cap through another revision.
+- Reviewer deployment: 5df86445-18bc-490f-a6c1-e21902a51080. A single /review command on PR456 starts the live verification; outcome recorded below when complete.
