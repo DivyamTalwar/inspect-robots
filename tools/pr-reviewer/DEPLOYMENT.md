@@ -106,4 +106,9 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 
 - The maintainer authorized increasing only PR456 head 696fbaa9a00d7c345a81dd179fa10934f51ade89 from $10 to $15 cumulative for a fresh verification run. The $15 PR lifetime and $200 monthly caps, and other heads' $5 default, remain unchanged. Prior charges remain intact; the run starts with $6.025252 available.
 - TypeScript and all 39 reviewer tests passed, including concurrent reservations against the updated exception and refusal to exceed the PR cap through another revision.
-- Reviewer deployment: 5df86445-18bc-490f-a6c1-e21902a51080. A single /review command on PR456 starts the live verification; outcome recorded below when complete.
+- Reviewer deployment: 5df86445-18bc-490f-a6c1-e21902a51080. A single /review command on PR456 started live workflow 256f8224ace3e0937f6e445d5032d0e71995febc701a8e06.
+
+- The verification run made 21 model calls and settled $3.982732 in model usage plus the $0.10 sandbox allowance. Revision total is $13.057480 of $15; $1.942520 remains. No model_budget stop was reported.
+- Cloudflare failed the execution step after roughly six minutes with WorkflowInternalError: "Attempt failed due to internal workflows error". Both instance diagnostics and the full-step recovery API report an errored step with no output. The service published a held notice with costs; no review verdict or test execution record from this run was recovered. This is an unresolved execution/durability failure, not a verified successful policy 3 review.
+- Public result: https://github.com/robocurve/inspect-robots/pull/456#issuecomment-5755747746
+- No second paid run was launched. A result-persistence/recovery improvement is needed before further paid verification; the exact underlying Cloudflare internal fault is not exposed by the available diagnostics.
