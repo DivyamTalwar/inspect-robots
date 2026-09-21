@@ -55,9 +55,11 @@ whose launch/result is uncertain. Queue ownership is released only after
 container destruction succeeds. Comment delivery, including stopped-work
 notices, uses a durable outbox.
 
-Input is pinned to a main commit and semantic issue title/body/state. The bot's
-comments do not invalidate that input. A later change to the issue or main
-stops the old fix instead of silently rebasing an approved artifact. Duplicate
+Input is pinned to a main commit when the issue reaches the front of the queue,
+and to semantic issue title/body/state. Triage already running can finish on
+its recorded commit after main advances. The bot's comments do not invalidate
+that input. An issue edit stops triage; a main change stops subsequent fix
+stages instead of silently rebasing an approved artifact. Duplicate
 checks run at intake and again before publishing/readying a fix. No backlog is
 automatically imported.
 

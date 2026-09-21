@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import {
   artifactDigest,
   digest,
+  SHA,
   StageOutput,
   validateFiles,
   type StageRequest,
@@ -174,6 +175,26 @@ export class IssueLedger extends DurableObject<IssueEnv> {
     const stage = job.stage ? this.get<Stage>("stages", job.stage) : null;
     if (stage && !stage.cleaned) return false;
     this.ctx.storage.sql.exec("DELETE FROM meta WHERE key='slot'");
+    return true;
+  }
+  async refreshUnstarted(id: string, current: IssueSnapshot) {
+    const job = this.get<Job>("jobs", id);
+    if (
+      !job ||
+      this.owner() !== id ||
+      job.state !== "queued" ||
+      job.stage !== null ||
+      job.next !== "triage" ||
+      current.number !== job.issue.number ||
+      current.state !== "open" ||
+      current.revision !== job.issue.revision ||
+      !SHA.test(current.base)
+    )
+      return false;
+    // Pin code only when admitted to the sandbox, before any paid evidence exists.
+    // Keep the durable job identity and lifetime charges unchanged.
+    job.issue.base = current.base;
+    this.save(job);
     return true;
   }
   async tickClaim(id: string) {

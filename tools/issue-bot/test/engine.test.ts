@@ -320,6 +320,99 @@ describe("durable issue coordinator", () => {
     expect(poll).toHaveBeenCalledTimes(1);
   });
 });
+describe("queue base freshness", () => {
+  async function fixture() {
+    const l = ledger();
+    const issue = { ...snapshot, revision: await semanticRevision(snapshot) };
+    const id = await l.register(issue, "", false);
+    const current = { ...issue };
+    const runner = { start: vi.fn(), poll: vi.fn(), cleanup: vi.fn() };
+    const e = {
+      ...testEnv,
+      LEDGER: { getByName: () => l },
+      PUBLISHER: {
+        read: async (path: string) =>
+          JSON.stringify(
+            path === "/commits/main"
+              ? { sha: current.base }
+              : {
+                  ...current,
+                  user: { id: current.authorId, login: current.author },
+                },
+          ),
+      },
+      RUNNER: runner,
+    } as unknown as IssueEnv;
+    return { l, issue, id, current, runner, e };
+  }
+  it("pins the latest base only after FIFO admission and preserves charges", async () => {
+    const { l, issue, id, current, runner, e } = await fixture();
+    const second = await l.register({ ...issue, number: 402 }, "", false);
+    current.base = "c".repeat(40);
+    expect(await l.refreshUnstarted(id, current)).toBe(false);
+    expect(await tick(e, second)).toBe(false);
+    expect(runner.start).not.toHaveBeenCalled();
+    await tick(e, id);
+    const job = (await l.job(id))!;
+    expect(job.issue.base).toBe(current.base);
+    expect((await l.job(second))?.issue.base).toBe(issue.base);
+    expect(runner.start.mock.calls[0][0].base).toBe(current.base);
+    expect(await l.costs(issue.number)).toBe(100000);
+    expect(
+      await l.refreshUnstarted(id, { ...current, base: "d".repeat(40) }),
+    ).toBe(false);
+    expect((await l.job(id))?.issue.base).toBe(current.base);
+  });
+  it("lets active triage finish on its immutable base after a merge", async () => {
+    const { l, issue, id, current, runner, e } = await fixture();
+    await tick(e, id);
+    const stage = (await l.stage((await l.job(id))!.stage!))!;
+    current.base = "c".repeat(40);
+    await tick(e, id);
+    expect(runner.poll).toHaveBeenCalledOnce();
+    expect(runner.cleanup).not.toHaveBeenCalled();
+    await l.checkpoint(
+      stage.request.checkpointToken,
+      JSON.stringify(output("NEEDS_INFO")),
+    );
+    expect(await tick(e, id)).toBe(true);
+    expect((await l.job(id))?.state).toBe("done");
+    expect((await l.outbox())[0].publication.issue.base).toBe(issue.base);
+    expect(runner.start).toHaveBeenCalledOnce();
+  });
+  it("cannot plan a serious fix using triage from an outdated base", async () => {
+    const { l, id, current, runner, e } = await fixture();
+    await tick(e, id);
+    const stage = (await l.stage((await l.job(id))!.stage!))!;
+    current.base = "c".repeat(40);
+    await l.checkpoint(
+      stage.request.checkpointToken,
+      JSON.stringify(output("CONFIRMED")),
+    );
+    await tick(e, id);
+    expect((await l.job(id))?.next).toBe("plan");
+    await tick(e, id);
+    expect((await l.job(id))?.state).toBe("held");
+    expect(runner.start).toHaveBeenCalledOnce();
+    expect((await l.outbox()).map((x) => x.publication.status)).toContain(
+      "REQUIRE_REVIEWER",
+    );
+  });
+  it.each([false, true])(
+    "still holds edited issues (already started: %s)",
+    async (started) => {
+      const { l, id, current, runner, e } = await fixture();
+      if (started) await tick(e, id);
+      current.title = "Changed reproduction";
+      current.base = "c".repeat(40);
+      await tick(e, id);
+      expect((await l.job(id))?.state).toBe("held");
+      expect(runner.start).toHaveBeenCalledTimes(started ? 1 : 0);
+      expect(runner.cleanup).toHaveBeenCalledTimes(started ? 1 : 0);
+      expect((await l.queueState()).owner).toBeNull();
+    },
+  );
+});
 describe("actionable holds", () => {
   it("retains the latest reviewer findings and limitations in the durable notice", async () => {
     const l = ledger(),

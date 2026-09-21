@@ -241,10 +241,19 @@ export async function tick(env: IssueEnv, id: string) {
     }
     if (!(await ledger.claim(id))) return false;
     const current = await snapshot(env, job.issue.number);
+    if (!job.stage && job.next === "triage") {
+      await ledger.refreshUnstarted(id, current);
+      job = (await ledger.job(id))!;
+    }
+    const activeStage = job.stage ? await ledger.stage(job.stage) : null;
+    // Read-only triage can finish on its recorded immutable base. Never carry
+    // stale evidence into planning, implementation, or publication of a fix.
+    const triaging =
+      activeStage?.request.kind === "triage" && !activeStage.consumed;
     if (
       current.state !== "open" ||
       current.revision !== job.issue.revision ||
-      current.base !== job.issue.base
+      (current.base !== job.issue.base && !triaging)
     ) {
       await ledger.hold(id, "issue_or_base_changed");
       if (job.stage) {

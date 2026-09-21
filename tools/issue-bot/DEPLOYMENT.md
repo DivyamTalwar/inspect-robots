@@ -110,3 +110,19 @@ all 57 Worker tests and TypeScript passed, and independent review approved.
 - Coordinator: `56be36f5-dd7a-4c4e-b113-c5d87abbddc7`
 - Runner: `0330dd2f-f4c8-43dc-9ed6-046a9f20a082`
 - Image: `sha256:6bd48d77597659588aca1d56fa266ac96d186da68341bd7e324d2600526f576f`
+
+## Backlog queue admission correction
+
+The 2026-09-21 jeqcho backlog exposed a freshness bug: two main merges held
+waiting jobs and interrupted active read-only triage. Before further retries,
+changed the coordinator to pin main at FIFO admission and allow an unconsumed
+triage stage to finish on its recorded immutable base. Edited issues still stop;
+later fix stages and publisher checks still reject stale bases. Job identities
+and lifetime charges are retained. No plan or approved artifact is rebased.
+
+All 62 Worker tests and TypeScript passed; independent review approved. The
+predeployment queue, outbox, and running Workflows were empty. Coordinator
+version `baecba13-51b9-470f-8933-3675095b4664` contains the repair. Publisher and
+runner were not changed. Backlog scope is issues 7, 236, 263, 303, 332, 354, 355,
+370, 396, 407, and 408; the completed #401 trial is excluded. Recovery uses
+request ID `backlog-queue-repair-20260921` without resetting prior spending.
