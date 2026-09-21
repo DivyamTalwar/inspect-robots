@@ -133,9 +133,20 @@ torque warning does not apply:
 inspect-robots-yam-health --watch --bind 127.0.0.1 --port 9XXX
 ```
 
-Open `http://127.0.0.1:9XXX/` on the robot host, or use a separate free port
-and forward it from your laptop with `ssh -L 9XXX:localhost:9XXX my-robot`.
-Press Ctrl-C to stop. The stream is unauthenticated; the explicit loopback
+Choose a watch port different from the Rerun viewer port. Open
+`http://127.0.0.1:9XXX/` on the robot host, or forward the watch port from
+your laptop in another terminal:
+
+```bash
+ssh -N -L 9XXX:localhost:9XXX robot-user@robot.example.com
+```
+
+Use the actual user and hostname here, rather than the `my-robot` alias:
+that alias would request the viewer's `RemoteForward` again and fail while
+the first SSH connection holds its port. Keep this tunnel open and visit
+`http://127.0.0.1:9XXX/` on your laptop, using the watch port throughout.
+Press Ctrl-C in each terminal to stop the watch server and tunnel.
+The stream is unauthenticated; the explicit loopback
 bind above limits access to the host and your SSH tunnel. Without `--bind`,
 watch mode listens on `0.0.0.0` (port 8807 unless overridden).
 
