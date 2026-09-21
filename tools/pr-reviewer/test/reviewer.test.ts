@@ -69,13 +69,23 @@ describe('budget ledger in the Workers runtime', () => {
   it('limits the authorized trial exception to its exact PR head and preserves the PR ceiling', async () => {
     const ledger = env.LEDGER.getByName(crypto.randomUUID());
     const revision = '456-696fbaa9a00d7c345a81dd179fa10934f51ade89';
-    expect(await ledger.remaining(revision, 456)).toBe(15_000_000);
+    expect(await ledger.remaining(revision, 456)).toBe(25_000_000);
     expect(await ledger.remaining(revision, 457)).toBe(5_000_000);
     expect(await ledger.remaining(`456-${head}`, 456)).toBe(5_000_000);
-    const accepted = await Promise.all(Array.from({ length: 17 }, (_, i) => ledger.reserve(`trial-${i}`, revision, 456, 1_000_000)));
-    expect(accepted.filter(Boolean)).toHaveLength(15);
+    const accepted = await Promise.all(Array.from({ length: 27 }, (_, i) => ledger.reserve(`trial-${i}`, revision, 456, 1_000_000)));
+    expect(accepted.filter(Boolean)).toHaveLength(25);
     expect(await ledger.reserve('another-head', `456-${head}`, 456, 1)).toBe(false);
     expect(await ledger.reserve('pr-ceiling', `456-${base}`, 456, 1)).toBe(false);
+  });
+  it('retains the default lifetime cap for other PRs and the shared monthly cap', async () => {
+    const ledger = env.LEDGER.getByName(crypto.randomUUID());
+    for (const [i, sha] of [head, base, 'c'.repeat(40)].entries()) expect(await ledger.reserve(`default-${i}`, `457-${sha}`, 457, 5_000_000)).toBe(true);
+    expect(await ledger.reserve('default-overflow', `457-${'d'.repeat(40)}`, 457, 1)).toBe(false);
+    const revision = '456-696fbaa9a00d7c345a81dd179fa10934f51ade89';
+    expect(await ledger.reserve('authorized', revision, 456, 20_000_000)).toBe(true);
+    for (let i = 0; i < 33; i++) expect(await ledger.reserve(`monthly-${i}`, `${1000 + i}-${head}`, 1000 + i, 5_000_000)).toBe(true);
+    expect(await ledger.remaining(revision, 456)).toBe(0);
+    expect(await ledger.reserve('monthly-overflow', revision, 456, 1)).toBe(false);
   });
   it('reports each run separately while retaining cumulative revision spending', async () => {
     const ledger = env.LEDGER.getByName(crypto.randomUUID());

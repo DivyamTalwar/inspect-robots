@@ -126,3 +126,9 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Earlier isolated probe `recovery-resume` recovered a separately saved result after its original workflow failed. A later probe encountered mixed deployment versions; it was discarded, and the final probe above used a fresh record after rollout settled. Production intake was paused during the two-service update.
 - Read-only production diagnostic `durability-budget-audit` completed after the ledger upgrade: $13.057480 cumulative PR456-head usage, $1.942520 remaining, zero unresolved reservations. This test submitted no model request and published no GitHub comment.
 - Deployed reviewer `41f24283-c5ad-4125-b011-39fa9ca42c44` and runner `d9eae883-166d-48d6-98a5-68ceb1f78d01`; publisher unchanged. Health confirms advisory mode, policy 3 and enabled intake. The temporary probe Workflow, container application and Worker were deleted after verification. No new OpenAI charges were incurred by recovery testing.
+
+
+## Authorized $25 trial allowance
+
+- The maintainer requested another budget increase and one fresh review. Raised only PR456's lifetime cap and head `696fbaa9a00d7c345a81dd179fa10934f51ade89` to $25 cumulative, leaving $11.942520 before launch. Existing charges remain intact. Other heads retain $5, other PRs retain $15 lifetime, and the shared monthly cap remains $200.
+- Added deployment-only PR lifetime exceptions, validated against the monthly cap. TypeScript and all 52 Workers/SQLite tests passed, including concurrent reservations, the exact-head restriction, unchanged defaults for other PRs, and the shared monthly ceiling.
