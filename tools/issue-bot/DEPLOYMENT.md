@@ -43,7 +43,10 @@ coordinator `44f70a65-7dd3-4f4f-ba6a-c65819718bcc`, runner
 Final client-only environment authentication runner:
 `eade74f4-0259-4bc2-80ba-a7b711d16364`, image digest
 `sha256:08b7f1d3528c7349a7967eeb1432ed183c93fd56b4c2f0132e1e60203ba57fdd`.
-Coordinator remains disabled at the version above.
+The user subsequently approved uploading the credentials and explicitly approved
+activation and the #401 trial. The dedicated OpenAI key and both GitHub secrets
+were uploaded to their named private services. Enabled coordinator version:
+`2904f553-fa56-4a65-9f62-c7450907c2c3`. Live health reports enabled.
 
 ## Verification and outstanding rollout
 
@@ -60,15 +63,32 @@ interpreter path assumption; using the active interpreter resolved it and the
 issue-bot job passed. CodeQL also prompted explicit read-only CI permissions and
 fixed-origin URL construction in the App setup helper.
 
-Credential upload is pending explicit approval for the named Cloudflare secret
-destinations following automatic approval review. Intake remains disabled.
-No paid model trial or live ready-for-review handoff has run yet.
+The pretrial management inspection returned an empty queue. Workflow
+`live-trial-401` enqueued job `f6eafe68895e28fcaef23121414879d7f2e0ddae3fcf2f9d`
+at 2026-09-21 07:47 UTC. Stage `af9c95d9-c2da-47c7-bc0e-b4edcacd2d2e` entered
+triage. It completed at 07:50 UTC and published
+[DUPLICATE on #401](https://github.com/robocurve/inspect-robots/issues/401#issuecomment-5757167152),
+tagging `@jeqcho`. Recorded lifetime issue spending was $1.126, including the
+$0.10 container allowance; this is ledger accounting, not a provider invoice.
+
+Astra independently reproduced missing final JSON logs for SafetyAbort and
+EmbodimentFault raised from observe_parked and before_scoring on trial 40. Both
+rollout-halt controls and the normal control wrote their expected final logs.
+The supplied open-PR evidence identified #404 as an existing fix, so the bot
+correctly avoided a competing implementation. The assessment explicitly states
+that #404's implementation, physical hardware and the full suite were not
+validated. The durable checkpoint was consumed, container cleanup succeeded,
+and the single public assessment was acknowledged in the outbox.
+
+No fix PR was created in this duplicate trial. Consequently, the automatic
+plan/implementation/review path and bot-authored ready-event handoff to the
+separate PR reviewer are covered by offline tests, but not a live fix trial.
 
 Selected trial issue: [#401](https://github.com/robocurve/inspect-robots/issues/401),
-authored by `jeqcho`. Existing open fixes mean a duplicate assessment is a valid
-outcome. Do not manufacture a competing PR to demonstrate the fix path. Record
-the actual review, spend and limitations after the trial; offline workflow tests
-do not establish that the separate live PR reviewer received a ready event.
+authored by `jeqcho`. Existing open fixes made a duplicate assessment the correct
+outcome. No competing PR was manufactured to demonstrate the fix path.
 
 Approved limits: $20 per issue lifetime and $200 per UTC month, including the
 trial, all model stages and conservative container allowances.
+The user set the shared OpenAI project budget to $400/month for both bots;
+this does not raise either bot's own $200/month allowance.

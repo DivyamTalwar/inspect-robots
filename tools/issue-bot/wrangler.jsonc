@@ -9,7 +9,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "vars": {
-    "ENABLED": "false",
+    "ENABLED": "true",
     "INSTALLATION_ID": "163417136",
     "ISSUE_LIMIT_MICROS": "20000000",
     "MONTH_LIMIT_MICROS": "200000000"

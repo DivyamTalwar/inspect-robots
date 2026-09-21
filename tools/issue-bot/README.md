@@ -101,7 +101,7 @@ installation, rather than merely narrowing a broad installation token.
 `node scripts/setup.mjs install` verifies an existing installation and updates
 non-secret config IDs. `node scripts/setup.mjs secrets` securely uploads the
 private key, webhook secret and OpenAI key. By default the OpenAI key is read
-from `~/.config/robocurve-pr-reviewer/openai-api-key`; override its path with
+from `.secrets/openai-api-key`; override its path with
 `ISSUE_OPENAI_KEY_FILE`. Never print or commit either key.
 
 Deploy with `ENABLED=false` until checks and isolated probes pass. The three

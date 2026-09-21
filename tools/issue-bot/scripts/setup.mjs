@@ -3,7 +3,6 @@ import { createServer } from "node:http";
 import { randomBytes, createPrivateKey, sign } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { resolve, join } from "node:path";
-import { homedir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { parse as parseJsonc } from "jsonc-parser";
@@ -233,7 +232,7 @@ try {
     configure(app);
     const apiKey = readFileSync(
       process.env.ISSUE_OPENAI_KEY_FILE ??
-        join(homedir(), ".config/robocurve-pr-reviewer/openai-api-key"),
+        join(secretDir, "openai-api-key"),
       "utf8",
     ).trim();
     if (!apiKey.startsWith("sk-") || /\s/.test(apiKey))
