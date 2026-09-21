@@ -64,7 +64,7 @@ describe('webhook dispatch', () => {
 
 describe('Codex review lifecycle', () => {
   it('runs a fresh CLI session with the policy and closes its scoped gateway access', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     let capability = '';
     const result = { worthwhile: 'YES', scope: 'ESTABLISHED', verdict: 'APPROVE', recommended_action: 'MERGE', rationale: 'Concrete boundary fix.', blockers: [], contract_and_test_review: 'Preserved.', checks: [], limitations: [], sufficient_review: true, decision_needed: '', body: 'Verified.' };
     s.config.RUNNER.start.mockImplementation(async (...args: any[]) => {
@@ -79,20 +79,20 @@ describe('Codex review lifecycle', () => {
     expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_900_000);
   });
   it('declines an underfunded rerun without starting a sandbox or spending more', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     await s.ledger.reserve('earlier-run', `9-${head}`, 9, 3_100_000);
     await expect(runReview(s.config as any, job, s.step)).rejects.toThrow('insufficient_run_budget');
     expect(s.config.RUNNER.start).not.toHaveBeenCalled();
     expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(1_900_000);
   });
   it('never accepts a partial verdict or retries a failed Codex session', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     await expect(runReview(s.config as any, job, s.step)).rejects.toThrow('codex_review_incomplete');
     expect(s.config.RUNNER.start).toHaveBeenCalledTimes(1);
     expect(s.config.RUNNER.poll).not.toHaveBeenCalled();
   });
   it('preserves the trusted gateway stop even if CLI diagnostics omit its reason', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     s.config.RUNNER.start.mockImplementation(async (...args: any[]) => {
       await s.ledger.sessionFailure(args[5], 'budget_exhausted');
       await s.ledger.checkpoint(args[5], JSON.stringify({ exitCode: 0, review: { verdict: 'APPROVE' }, failure: null, executions: [] }));
@@ -105,7 +105,7 @@ const savedApproval = { worthwhile: 'YES', scope: 'ESTABLISHED', verdict: 'APPRO
 const completeOutput = JSON.stringify({ exitCode: 0, failure: null, review: savedApproval, executions: [] });
 describe('durable result recovery', () => {
   it('recovers after the workflow loses the poll acknowledgement without new inference', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     let token = '';
     s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { token = args[5]; });
     s.config.RUNNER.poll.mockImplementation(async () => { await s.ledger.checkpoint(token, completeOutput); throw new Error('injected lost acknowledgement'); });
@@ -116,7 +116,7 @@ describe('durable result recovery', () => {
     expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_900_000);
   });
   it('reuses the completed result on another workflow even if no budget remains', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     const execution = await s.ledger.prepareExecution(job.id, base);
     await s.ledger.checkpoint(execution.token, completeOutput);
     await s.ledger.closeSession(execution.token);
@@ -127,14 +127,14 @@ describe('durable result recovery', () => {
     expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(0);
   });
   it('does not let cleanup failure overwrite a completed review', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { await s.ledger.checkpoint(args[5], completeOutput); });
     s.config.RUNNER.cleanup.mockRejectedValue(new Error('injected destroy failure'));
     expect((await runReview(s.config as any, job, s.step)).verdict).toBe('APPROVE');
     expect(await s.ledger.runOutput(job.id)).toBe(completeOutput);
   });
   it('keeps a pending process accessible after a transient workflow failure', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     let token = '';
     s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { token = args[5]; });
     s.config.RUNNER.poll.mockRejectedValue(new Error('injected platform failure'));
@@ -148,26 +148,74 @@ describe('durable result recovery', () => {
 });
 
 describe('publication durability', () => {
-  it('keeps a validated verdict pending when GitHub publication fails', async () => {
-    const s = setup(); await s.ledger.register(job);
-    s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { await s.ledger.checkpoint(args[5], completeOutput); });
-    const publish = vi.fn(async (_job: unknown, _result: unknown, notice?: string) => { if (notice === 'started') return true; throw new Error('injected publisher outage'); });
+  it('keeps a failed workflow hold pending and publishes it after GitHub recovers', async () => {
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
+    await s.ledger.reserve('earlier-run', `9-${head}`, 9, 3_100_000);
+    const publish = vi.fn(async (_job: unknown, _result: unknown, notice?: string) => {
+      if (notice === 'held') throw new Error('publisher outage');
+      return true;
+    });
     const config = { ...s.config, PUBLISHER: { ...s.config.PUBLISHER, publish } };
     const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
     Object.defineProperty(workflow, 'env', { value: config });
-    await workflow.run({ payload: { id: job.id } } as any, s.step as WorkflowStep);
+    await expect(workflow.run({ instanceId: job.id, payload: { id: job.id } } as any, s.step as WorkflowStep)).rejects.toThrow('publisher outage');
+    expect((await s.ledger.job(job.id))?.status).toBe('holding');
+    expect((await s.ledger.pending()).map(j => j.id)).toContain(job.id);
+    expect((await s.ledger.queueState()).owner).toBeNull();
+    publish.mockResolvedValue(true);
+    await worker.scheduled({} as ScheduledController, config as any);
+    expect((await s.ledger.job(job.id))?.status).toBe('held');
+    expect(publish).toHaveBeenLastCalledWith(expect.objectContaining({ id: job.id }), expect.objectContaining({ code: 'insufficient_run_budget' }), 'held');
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+    expect((await s.ledger.costs(job.id)).modelCalls).toBe(0);
+  });
+  it('retries a hold created by scheduled interruption recovery', async () => {
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
+    await s.ledger.finish(job.id, 'running');
+    const publish = vi.fn(async (): Promise<boolean> => { throw new Error('publisher outage'); });
+    const get = vi.fn(async () => ({ status: async () => ({ status: 'errored' }) }));
+    const config = { ...s.config, REVIEW: { ...s.config.REVIEW, get }, PUBLISHER: { ...s.config.PUBLISHER, publish } };
+    await worker.scheduled({} as ScheduledController, config as any);
+    expect((await s.ledger.job(job.id))?.status).toBe('holding');
+    publish.mockResolvedValue(true);
+    await worker.scheduled({} as ScheduledController, config as any);
+    expect((await s.ledger.job(job.id))?.status).toBe('held');
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+  });
+  it('keeps a validated verdict pending when GitHub publication fails', async () => {
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
+    s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { await s.ledger.checkpoint(args[5], completeOutput); });
+    const publish = vi.fn(async (_job: unknown, _result: unknown, notice?: string) => { if (notice === 'started' || notice === 'queued') return true; throw new Error('injected publisher outage'); });
+    const config = { ...s.config, PUBLISHER: { ...s.config.PUBLISHER, publish } };
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: config });
+    await workflow.run({ instanceId: job.id, payload: { id: job.id } } as any, s.step as WorkflowStep);
     const saved = await s.ledger.job(job.id);
     expect(saved?.status).toBe('publishing');
     expect(JSON.parse(saved!.result!).verdict).toBe('APPROVE');
-    expect(publish).toHaveBeenCalledTimes(2);
+    expect(publish).toHaveBeenCalledTimes(3);
     expect((await s.ledger.pending()).map(v => v.id)).toContain(job.id);
   });
 });
 
 
 describe('scheduled recovery', () => {
+  it('retries uncertain cleanup for terminal jobs before admitting another review', async () => {
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
+    const execution = await s.ledger.prepareExecution(job.id, base);
+    await s.ledger.checkpoint(execution.token, completeOutput);
+    await s.ledger.finish(job.id, 'done');
+    await s.ledger.register({ ...job, id: 'next', pr: 10 });
+    s.config.RUNNER.cleanup.mockRejectedValueOnce(new Error('temporary cleanup failure'));
+    await worker.scheduled({} as ScheduledController, s.config as any);
+    expect(await s.ledger.claimReviewSlot('next')).toBe('waiting');
+    await worker.scheduled({} as ScheduledController, s.config as any);
+    expect(await s.ledger.claimReviewSlot('next')).toBe('acquired');
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+  });
   it('resumes a failed execution using the original job and latest workflow instance', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     const execution = await s.ledger.prepareExecution(job.id, base);
     await s.ledger.finish(job.id, 'running');
     await s.ledger.workflowInstance(job.id, 'previous-recovery');
@@ -183,7 +231,7 @@ describe('scheduled recovery', () => {
     expect(s.config.RUNNER.start).not.toHaveBeenCalled();
   });
   it('publishes a saved result after an outage without launching another review', async () => {
-    const s = setup(); await s.ledger.register(job);
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
     await s.ledger.finish(job.id, 'publishing', JSON.stringify(savedApproval));
     const publish = vi.fn(async () => true);
     await worker.scheduled({} as ScheduledController, { ...s.config, PUBLISHER: { ...s.config.PUBLISHER, publish } } as any);
@@ -194,9 +242,49 @@ describe('scheduled recovery', () => {
   });
 });
 
+it('queues simultaneous ready events and runs their workflows one at a time', async () => {
+  const s = setup();
+  const read = s.read.getMockImplementation()!;
+  s.read.mockImplementation(async p => p === '/pulls/10' ? JSON.stringify({ ...pr, number: 10 }) : read(p));
+  await Promise.all([9, 10].map(async number => handleWebhook(await webhook({ ...repo, action: 'ready_for_review', number }, 'pull_request'), s.config)));
+  expect(s.create).toHaveBeenCalledTimes(2);
+  const jobs = await s.ledger.pending();
+  let active = 0, peak = 0;
+  let unblockFirst!: () => void, firstStarted!: () => void, unblockWaiter!: () => void, waiterSleeping!: () => void;
+  const blocked = new Promise<void>(resolve => { unblockFirst = resolve; });
+  const started = new Promise<void>(resolve => { firstStarted = resolve; });
+  const waiting = new Promise<void>(resolve => { waiterSleeping = resolve; });
+  const resume = new Promise<void>(resolve => { unblockWaiter = resolve; });
+  s.config.RUNNER.start.mockImplementation(async (...args: any[]) => {
+    peak = Math.max(peak, ++active);
+    if (s.config.RUNNER.start.mock.calls.length === 1) { firstStarted(); await blocked; }
+    await s.ledger.checkpoint(args[5], completeOutput);
+  });
+  s.config.RUNNER.cleanup.mockImplementation(async () => { active--; });
+  const publish = vi.fn(async () => true);
+  const config = { ...s.config, PUBLISHER: { ...s.config.PUBLISHER, publish } };
+  function execute(id: string, step: typeof s.step) {
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: config });
+    return workflow.run({ instanceId: id, payload: { id } } as any, step as WorkflowStep);
+  }
+  const first = execute(jobs[0].id, s.step);
+  await started;
+  const second = execute(jobs[1].id, { ...s.step, sleep: async () => { waiterSleeping(); await resume; } });
+  await waiting;
+  expect(s.config.RUNNER.start).toHaveBeenCalledTimes(1);
+  expect((await s.ledger.costs(jobs[1].id)).sandboxMicros).toBe(0);
+  expect(publish.mock.calls.some((c: any[]) => c[0].id === jobs[1].id && c[2] === 'queued')).toBe(true);
+  unblockFirst(); await first;
+  unblockWaiter(); await second;
+  expect(s.config.RUNNER.start).toHaveBeenCalledTimes(2);
+  expect(peak).toBe(1);
+  expect((await s.ledger.queueState()).owner).toBeNull();
+});
+
 
 it('allows an operator to inspect saved output without inference or publication', async () => {
-  const s = setup(); await s.ledger.register(job);
+  const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
   const execution = await s.ledger.prepareExecution(job.id, base);
   await s.ledger.checkpoint(execution.token, completeOutput);
   const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;

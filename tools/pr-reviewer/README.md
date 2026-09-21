@@ -31,6 +31,12 @@ deleted or bot-only author accounts fall back to `@jeqcho` to coordinate changes
 They disclose automation and record actual sandbox commands separately from CI. Contributor
 intent and personal characteristics are never grounds for a finding.
 
+An unfinished review that has confirmed defects still uses `REQUIRE_REVIEWER`,
+but leads with the bugs and required fixes above the expandable details. It tags
+`@jeqcho` to coordinate fixes first and finish the remaining validation afterward.
+Unfinished checks appear as a visible "Remaining checks" checklist before the
+expandable section. "Checks completed" inside the details lists work already done.
+
 The bot does not merge, close, label, submit formal approving reviews, edit code,
 approve Actions, or modify branch rules. Its named check is initially advisory.
 Making this check required needs a separate maintainer decision.
@@ -72,12 +78,19 @@ repeat inference. The result-delivery capability is separate from the model
 capability and stored in a root-only request file; unprivileged review commands
 cannot use their model token to submit a terminal result.
 
+Canonical head/base snapshots and context are root-owned and read-only, beneath
+root-owned, non-writable parent directories. Archive permission bits cannot make
+them writable. Build backends run as a separate unprivileged user in a disposable
+copy; they cannot alter canonical evidence, the reviewer's home or its result
+directory. Setup records are written by the trusted launcher. Codex receives a
+writable scratch directory for reproductions and modified test copies.
+
 The sandbox runs Codex and its commands as an unprivileged user. Scratch files
 persist within that fresh session and are destroyed afterward. Python 3.11,
 NumPy, pytest, hypothesis, pip, Hatch and rg are preinstalled. Offline local package
 builds run automatically for core and changed Python packages, using a disposable
 copy of the source and synthetic version 0.0.0. Installation is offline, without
-dependencies or build isolation, as the same unprivileged user; each package has
+dependencies or build isolation, as the build user; each package has
 a 45-second limit and setup has a 2-minute total limit. Codex receives setup.json
 and can repair routine setup failures. Network installs and hardware checks remain
 unavailable. Setup and Codex together have a 20-minute deadline, with an independent container shutdown at 22 minutes.
@@ -98,6 +111,9 @@ reconciler. Interrupted workflows resume the same execution and saved output,
 including when remaining budget is below the admission floor. They never silently
 start a new paid session. An expired execution with no output remains incomplete.
 The old PR456 failure predates checkpointing and cannot be recovered retroactively.
+Failure notices use a separate pending-publication state too. Both workflow and
+scheduled-recovery errors remain retryable until GitHub acknowledges the notice;
+retrying delivery does not run another model review.
 
 Each sandbox session reserves $0.10 conservatively against the same spending caps.
 That is a budget allowance, not a claim that Cloudflare charges ten cents. Its model
@@ -161,6 +177,18 @@ New non-draft PRs and new revisions trigger review. Drafts and closed PRs are
 ignored. There is no initial backlog scan. A ten-minute reconciliation schedule
 recovers queued jobs and updates approved comments when CI turns green.
 
+Every trigger shares a durable FIFO queue in the SQLite ledger. Workflows display
+a queued GitHub check and sleep on Cloudflare until they atomically acquire the
+single review slot. Waiting does not reserve sandbox or model budget. Admission
+rechecks whether the PR is still open, non-draft and on the same revision. The
+slot is released only after acknowledged sandbox cleanup, or if no sandbox was
+prepared. Uncertain cleanup retains ownership and is retried by reconciliation.
+Restarts preserve order and ownership; interrupted waiting workflows resume the
+same job. Long waits are continued in a new Workflow instance before step history
+can grow indefinitely. Backlog commands use this same queue and need no local
+dispatcher or computer left online. Budgets and one-container concurrency remain
+unchanged.
+
 Only GitHub user ID `42904912` (`jeqcho`) can request these commands:
 
 ```text
@@ -208,6 +236,14 @@ Tests use the real local Workers/SQLite runtime with all network calls mocked.
 They cover concurrent spending, replay, head changes, untrusted inputs, decision
 consistency, publication boundaries and ambiguous model failures. CI runs them
 without production credentials.
+They also cover concurrent ready events, durable FIFO ownership, zero spending
+while waiting, cleanup failures and both failure-notice publication paths.
+`sandbox/test_evidence.py` runs offline as root inside the review image. Its real
+Python build backend attempts source/context replacement, parent-directory
+renames, permission changes and result forgery; all must fail while package
+installation and writable scratch reproductions still work.
+It also starts the real Codex CLI against a local synthetic Responses server,
+verifying its home-directory permissions and result output without an OpenAI key.
 
 Hosting estimate (before adding sandbox execution): a few hundred reviews per month should fit the included
 Workers, Workflows and SQLite allowances, so the expected incremental hosting
@@ -228,6 +264,9 @@ starting Codex or publishing a comment:
 npx wrangler workflows trigger inspect-robots-review '{"id":"EXISTING_RUN_ID","inspectOnly":true}' --json
 npx wrangler workflows instances describe inspect-robots-review RETURNED_INSTANCE_ID --json
 ```
+
+Use `{"id":"queue-status","inspectQueue":true}` with the same trigger command
+to inspect the active slot owner and FIFO backlog without inference or publishing.
 
 Operators can also use `"inspectOutput":true` instead of `"inspectOnly":true` to
 read a saved terminal artifact and its costs when diagnosing validation failures.

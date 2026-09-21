@@ -13,7 +13,7 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
       throw error;
     }
   }
-  async publish(job: Job, result: unknown, notice?: 'started' | 'held' | 'budget-warning'): Promise<boolean> {
+  async publish(job: Job, result: unknown, notice?: 'queued' | 'started' | 'held' | 'budget-warning'): Promise<boolean> {
     if (!Number.isSafeInteger(job.pr) || job.pr < 1 || !SHA.test(job.head) || !SHA.test(job.base) || !/^[a-z0-9-]{1,100}$/.test(job.id)) throw new Error('invalid_publication');
     const token = await installationToken(this.env, true);
     const read = (p: string) => github(token, `/repos/${REPO}${p}`);
@@ -21,7 +21,9 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
     if (!current(job, pr)) return false;
     let body: string;
     let conclusion: 'success' | 'failure' | 'action_required' | undefined;
-    if (notice === 'started') {
+    if (notice === 'queued') {
+      body = `Independent review is queued for ${job.head}. It will start automatically when the review sandbox is free. No sandbox or model spending occurs while waiting.`;
+    } else if (notice === 'started') {
       body = `Independent review is running for ${job.head}.`;
     } else if (notice === 'held') {
       body = renderHold(job, result);
@@ -41,10 +43,10 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
     if (notice !== 'budget-warning') {
       const runs = await read(`/commits/${job.head}/check-runs?check_name=${encodeURIComponent(CHECK_NAME)}&per_page=100`);
       const previous = runs.check_runs?.find((r: any) => r.app?.id === APP_ID && r.external_id === job.id);
-      const payload = { name: CHECK_NAME, ...(!previous ? { head_sha: job.head } : {}), external_id: job.id, status: conclusion ? 'completed' : 'in_progress', ...(conclusion ? { conclusion } : {}), output: { title: notice === 'started' ? 'Independent review running' : 'Independent review result', summary: body } };
+      const payload = { name: CHECK_NAME, ...(!previous ? { head_sha: job.head } : {}), external_id: job.id, status: conclusion ? 'completed' : notice === 'queued' ? 'queued' : 'in_progress', ...(conclusion ? { conclusion } : {}), output: { title: notice === 'queued' ? 'Independent review queued' : notice === 'started' ? 'Independent review running' : 'Independent review result', summary: body } };
       await github(token, `/repos/${REPO}/check-runs${previous ? `/${previous.id}` : ''}`, previous ? 'PATCH' : 'POST', payload);
     }
-    if (notice === 'started') return true;
+    if (notice === 'started' || notice === 'queued') return true;
     const marker = `<!-- inspect-robots-review:${job.id}${notice === 'budget-warning' ? ':budget' : ''} -->`;
     // One comment per snapshot. Old snapshots never overwrite newer review comments.
     let previous;

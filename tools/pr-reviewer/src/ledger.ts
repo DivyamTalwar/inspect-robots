@@ -38,7 +38,54 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     return this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0] ?? null;
   }
   async pending(): Promise<Job[]> {
-    return this.ctx.storage.sql.exec<Job>("SELECT * FROM jobs WHERE status IN ('queued','running','approved','recovering','publishing') ORDER BY created LIMIT 100").toArray();
+    return this.ctx.storage.sql.exec<Job>("SELECT * FROM jobs WHERE status IN ('queued','running','approved','recovering','publishing','holding') ORDER BY created LIMIT 100").toArray();
+  }
+  async queueState(): Promise<{ owner: string | null; waiting: { id: string; pr: number }[] }> {
+    return { owner: this.slotOwner(), waiting: this.ctx.storage.sql.exec<{ id: string; pr: number }>("SELECT id,pr FROM jobs WHERE status='queued' ORDER BY created,rowid").toArray() };
+  }
+  private slotOwner(): string | null {
+    return this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM settings WHERE key='review-slot'").toArray()[0]?.value ?? null;
+  }
+  async claimReviewSlot(id: string): Promise<'acquired' | 'waiting' | 'obsolete'> {
+    // The whole admission decision is synchronous and atomic, including FIFO order.
+    return this.ctx.storage.transactionSync(() => {
+      const job = this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0];
+      if (!job) throw new Error('unknown_job');
+      if (!['queued', 'running', 'recovering', 'publishing'].includes(job.status)) return 'obsolete';
+      let owner = this.slotOwner();
+      if (!owner) {
+        // Adopt a run launched before this deployment, or interrupted before its
+        // caller recorded admission. Never steal a slot merely because time passed.
+        const legacy = this.ctx.storage.sql.exec<{ id: string }>("SELECT id FROM jobs WHERE status IN ('running','recovering') AND NOT EXISTS (SELECT 1 FROM settings WHERE key='cleaned-' || jobs.id) ORDER BY created,rowid LIMIT 1").toArray()[0];
+        if (legacy) {
+          owner = legacy.id;
+          this.ctx.storage.sql.exec("INSERT OR REPLACE INTO settings VALUES('review-slot',?)", owner);
+        }
+      }
+      if (owner) return owner === id ? 'acquired' : 'waiting';
+      const first = this.ctx.storage.sql.exec<{ id: string }>("SELECT id FROM jobs WHERE status='queued' ORDER BY created,rowid LIMIT 1").toArray()[0];
+      if (first && first.id !== id) return 'waiting';
+      this.ctx.storage.sql.exec("INSERT OR REPLACE INTO settings VALUES('review-slot',?)", id);
+      return 'acquired';
+    });
+  }
+  async sandboxCleaned(id: string): Promise<void> {
+    this.ctx.storage.sql.exec('INSERT OR REPLACE INTO settings VALUES(?,?)', `cleaned-${id}`, 'true');
+  }
+  async isSandboxCleaned(id: string): Promise<boolean> {
+    return this.ctx.storage.sql.exec('SELECT value FROM settings WHERE key=?', `cleaned-${id}`).toArray().length > 0;
+  }
+  async releaseReviewSlot(id: string): Promise<boolean> {
+    return this.ctx.storage.transactionSync(() => {
+      if (this.slotOwner() !== id) return true;
+      // A saved verdict, timeout or expired lease is NOT proof that the container
+      // stopped. Keep the slot until cleanup was acknowledged (or none was made).
+      const execution = this.ctx.storage.sql.exec('SELECT job FROM executions WHERE job=?', id).toArray().length;
+      const cleaned = this.ctx.storage.sql.exec('SELECT value FROM settings WHERE key=?', `cleaned-${id}`).toArray().length;
+      if (execution && !cleaned) return false;
+      this.ctx.storage.sql.exec("DELETE FROM settings WHERE key='review-slot' AND value=?", id);
+      return true;
+    });
   }
   async finish(id: string, status: string, result: string | null = null): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE jobs SET status=?,result=? WHERE id=?', status, result, id);
@@ -94,6 +141,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
   async prepareExecution(id: string, mergeBase: string): Promise<Execution> {
     const existing = await this.execution(id);
     if (existing) return existing;
+    if (this.slotOwner() !== id) throw new Error('review_slot_required');
     const job = await this.job(id);
     if (!job || !SHA.test(mergeBase)) throw new Error('invalid_review_request');
     if (await this.remaining(`${job.pr}-${job.head}`, job.pr) < 2_000_000) throw new Error('insufficient_run_budget');
@@ -101,6 +149,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     return this.ctx.storage.transactionSync(() => {
       const prior = this.ctx.storage.sql.exec<Execution>('SELECT token,checkpointToken,sandbox,started,mergeBase FROM executions WHERE job=?', id).toArray()[0];
       if (prior) return prior;
+      if (this.slotOwner() !== id) throw new Error('review_slot_required');
       if (!this.reserveNow(`${id}-sandbox`, `${job.pr}-${job.head}`, job.pr, 100_000)) throw new Error('budget_exhausted');
       const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
       const checkpointToken = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');

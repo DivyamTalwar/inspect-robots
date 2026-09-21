@@ -103,10 +103,17 @@ export function publicText(text: string): string {
 }
 
 export function renderReview(job: Job, review: Review, ciGreen: boolean, executions: z.infer<typeof ExecutionRecords> = [], author = ''): string {
-  let body = `**${review.verdict}**. ${publicText(review.rationale).replace(/\s+/g, ' ').trim()}`;
+  const incompleteWithBugs = review.verdict === 'REQUIRE_REVIEWER' && review.blockers.length > 0;
+  let body = `**${review.verdict}**. ${incompleteWithBugs ? `Fix ${review.blockers.length === 1 ? 'the confirmed blocking defect' : `the ${review.blockers.length} confirmed blocking defects`} below; review is also incomplete. ` : ''}${publicText(review.rationale).replace(/\s+/g, ' ').trim()}`;
   if (review.verdict === 'APPROVE') body += ciGreen ? '\n\n@jeqcho, review approved and ci-ok is green for this revision. Please review and merge if you agree.' : '\n\n@jeqcho, review approved. Waiting for ci-ok before requesting a merge.';
   else if (review.verdict === 'ESCALATE') body += `\n\n@jeqcho, ${review.recommended_action === 'CLOSE' ? 'please decide whether to close this PR. ' : 'your decision is needed. '}${publicText(review.decision_needed).replace(/\s+/g, ' ').trim()}`;
-  else if (review.verdict === 'REQUIRE_REVIEWER') body += '\n\n@jeqcho, please arrange completion of the outstanding review checks listed below. The reviewer could not finish; no merge or closure recommendation was issued. This does not require a product decision.';
+  else if (review.verdict === 'REQUIRE_REVIEWER') {
+    if (incompleteWithBugs) {
+      body += '\n\n@jeqcho, please coordinate fixes for the confirmed bugs below, then complete the remaining validation. Do not merge until both are addressed.';
+      for (const b of review.blockers) body += `\n\n- ${publicText(b.file)}:${b.line}: ${publicText(b.actual)} Fix: ${publicText(b.fix)}`;
+    } else body += '\n\n@jeqcho, please complete or delegate the remaining checks below before deciding whether to merge. The review is incomplete.';
+    body += '\n\n**Remaining checks:**\n\n' + review.limitations.map(item => `- [ ] ${publicText(item)}`).join('\n');
+  }
   else {
     // Only a login supplied by the trusted publisher may become a live mention.
     const authorAvailable = /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(author) && author.toLowerCase() !== 'ghost';
@@ -114,8 +121,8 @@ export function renderReview(job: Job, review: Review, ciGreen: boolean, executi
   }
   body += `\n\n<details>\n<summary>Review details, findings and checks</summary>\n\nAutomated independent review of commit \`${job.head}\` (base \`${job.base}\`).\n\nWorthwhile: ${review.worthwhile}\nScope: ${review.scope}\nRecommendation: ${review.recommended_action}\n\n${review.body.trim() ? publicText(review.body) + '\n\n' : ''}Contracts and tests: ${publicText(review.contract_and_test_review)}`;
   for (const b of review.blockers) body += `\n\n${publicText(b.file)}:${b.line}: ${publicText(b.trigger)}\nExpected: ${publicText(b.expected)}\nObserved from code: ${publicText(b.actual)}\nImpact: ${publicText(b.impact)}\nSuggested fix: ${publicText(b.fix)}`;
-  body += `\n\nChecks: ${publicText(review.checks.join('; '))}\n\n${executions.length ? 'Sandbox execution records (CI is checked separately):\n' : 'No sandbox commands were executed; CI is checked separately.'}`;
+  body += `\n\nChecks completed:\n\n${review.checks.map(item => `- ${publicText(item)}`).join('\n')}\n\n${executions.length ? 'Sandbox execution records (CI is checked separately):\n' : 'No sandbox commands were executed; CI is checked separately.'}`;
   for (const execution of executions.slice(0, 10)) body += `\n- Revision ${execution.revision.slice(0, 12)}, exit ${execution.exitCode ?? 'unknown'}${execution.limit ? `, ${publicText(execution.limit)}` : ''}: ${publicText(execution.command.slice(0, 500)).replace(/\n/g, ' ')}`;
-  if (review.limitations.length) body += `\n\nLimitations: ${publicText(review.limitations.join('; '))}`;
+  if (review.limitations.length && review.verdict !== 'REQUIRE_REVIEWER') body += `\n\nLimitations:\n\n${review.limitations.map(item => `- ${publicText(item)}`).join('\n')}`;
   return body + '\n\n</details>';
 }

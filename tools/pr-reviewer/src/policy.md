@@ -131,7 +131,14 @@ Return the provided JSON schema. Public body should be short, specific, courteou
 and useful. The publisher starts every review with its uppercase status, then
 rationale as the TL;DR: use one or two
 short sentences, at most 360 characters, stating what the PR changes and the
-main reason for the verdict. If review is incomplete, say so there. Do not repeat
+main reason for the verdict. When a review is incomplete but has confirmed defects,
+lead with those actionable bugs and the required fixes, then state what validation
+remains incomplete. Missing validation does not diminish a reproduced defect.
+Each limitations entry must name one concrete unfinished check, why it could not
+run, and the action to complete it. Write these as actionable checklist items;
+the publisher displays them under "Remaining checks" before the collapsed details.
+Put only completed inspection or executed checks in checks, including their results.
+If review is incomplete, say so there. Do not repeat
 the verdict label; the publisher adds it. Put the concrete decision and options
 in decision_needed, at most two short sentences and 500 characters. This appears
 immediately after the TL;DR. Details, findings, checks and command records appear

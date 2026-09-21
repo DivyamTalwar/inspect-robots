@@ -15,6 +15,7 @@ export async function runReview(env: ReviewEnvironment, job: Job, step: Pick<Wor
   let raw = await ledger.runOutput(job.id);
   try {
     if (raw === null) {
+      if (await ledger.isSandboxCleaned(job.id)) throw new Error('codex_review_incomplete');
       if (Date.now() - execution.started >= 22 * 60_000) { timedOut = true; throw new Error('model_timeout'); }
       await step.do('launch Codex process', retryRead, async () => {
         if (await ledger.runOutput(job.id) !== null) return;
@@ -43,7 +44,10 @@ export async function runReview(env: ReviewEnvironment, job: Job, step: Pick<Wor
       try { await step.do('revoke reviewer access', retryRead, () => ledger.closeSession(execution.token)); }
       catch { console.error(JSON.stringify({ event: 'review_revocation_deferred', job: job.id })); }
       // Cleanup is independently retryable and cannot replace a saved verdict.
-      try { await step.do('cleanup reviewer sandbox', retryRead, () => env.RUNNER.cleanup(execution.sandbox)); }
+      try {
+        await step.do('cleanup reviewer sandbox', retryRead, () => env.RUNNER.cleanup(execution.sandbox));
+        await step.do('record sandbox cleanup', () => ledger.sandboxCleaned(job.id));
+      }
       catch { console.error(JSON.stringify({ event: 'review_cleanup_deferred', job: job.id })); }
     }
   }

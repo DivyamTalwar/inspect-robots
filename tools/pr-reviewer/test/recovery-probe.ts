@@ -66,7 +66,7 @@ export class RecoveryProbe extends WorkflowEntrypoint<ProbeEnv, { replay?: boole
   async run(_event: WorkflowEvent<{ replay?: boolean }>, step: WorkflowStep) {
     const ledger = this.env.LEDGER.getByName('budget');
     const job: Job = { id: 'recovery-probe-v3', pr: 999999, head, base, scope: '', status: 'running', result: null, created: 1, notified: 0 };
-    await ledger.register(job);
+    await ledger.register(job); await ledger.claimReviewSlot(job.id);
     const wrapped = {
       do: (async (name: string, config: unknown, callback: unknown) => {
         const value = await Reflect.apply(step.do, step, [name, config, callback]);

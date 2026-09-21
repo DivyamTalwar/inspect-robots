@@ -15,6 +15,40 @@ from contextlib import suppress
 from pathlib import Path
 
 
+def protect_evidence(workspace):
+    """Keep snapshots and evidence immutable, including their parent directories.
+
+    Only explicitly designated scratch locations belong to unprivileged users.
+    Permissions must be normalized: archive modes are contributor-controlled.
+    """
+    for parent in (workspace.parent, workspace):
+        os.chown(parent, 0, 0)
+        parent.chmod(0o755)
+    for root in (workspace / "head", workspace / "base"):
+        for path in [root, *root.rglob("*")]:
+            executable = path.stat().st_mode & 0o111
+            os.chown(path, 0, 0)
+            path.chmod(0o755 if path.is_dir() else 0o555 if executable else 0o444)
+    context = workspace / "context.json"
+    os.chown(context, 0, 0)
+    context.chmod(0o444)
+    for name, owner in (
+        ("home", 65534),
+        ("scratch", 65534),
+        ("output", 65534),
+        ("build-home", 65533),
+        ("python-packages", 65533),
+    ):
+        path = workspace / name
+        path.mkdir()
+        os.chown(path, owner, owner)
+        path.chmod(0o700 if name in ("home", "output", "build-home") else 0o755)
+    codex_home = workspace / "home" / ".codex"
+    codex_home.mkdir()
+    os.chown(codex_home, 65534, 65534)
+    codex_home.chmod(0o700)
+
+
 def unpack(archive_path, root):
     """Extract bounded regular source files without links or path traversal."""
     root.mkdir(parents=True, exist_ok=True)
@@ -43,7 +77,7 @@ def unpack(archive_path, root):
 
 
 def prepare_packages(workspace, environment, revision):
-    """Build changed local Python packages offline as the same unprivileged user.
+    """Build changed local Python packages offline as a separate unprivileged user.
 
     Build a disposable copy so backend writes cannot contaminate the source diff.
     Failures remain visible to Codex; unsupported dependencies never block inspection.
@@ -70,7 +104,12 @@ def prepare_packages(workspace, environment, revision):
             projects.append(relative)
     build = workspace / "build-source"
     shutil.copytree(head, build)
-    subprocess.run(["chown", "-R", "65534:65534", str(build)], check=True)
+    # This copy still contains only validated regular archive files. Never recurse
+    # as root through a tree after a build backend has had a chance to add symlinks.
+    for path in [build, *build.rglob("*")]:
+        executable = path.stat().st_mode & 0o111
+        os.chown(path, 65533, 65533)
+        path.chmod(0o755 if path.is_dir() or executable else 0o644)
     deadline = time.monotonic() + 120
     results, executions = [], []
     for relative in projects:
@@ -96,12 +135,17 @@ def prepare_packages(workspace, environment, revision):
             process = subprocess.Popen(
                 command,
                 cwd=build,
-                env={**environment, "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.0"},
+                env={
+                    **environment,
+                    "HOME": str(workspace / "build-home"),
+                    "PYTHONPATH": "/opt/review-env/lib/python3.11/site-packages",
+                    "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.0",
+                },
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
-                user=65534,
-                group=65534,
+                user=65533,
+                group=65533,
                 extra_groups=[],
             )
             try:
@@ -137,18 +181,14 @@ def main():
     unpack("/tmp/head.tar.gz", workspace / "head")
     unpack("/tmp/base.tar.gz", workspace / "base")
     home = workspace / "home"
-    home.mkdir()
-    (home / ".codex").mkdir()
     (workspace / "context.json").write_text(request["context"])
     Path("/tmp/review-schema.json").write_text(request["schema"])
-    subprocess.run(["chown", "-R", "65534:65534", str(workspace)], check=True)
+    protect_evidence(workspace)
     environment = {
         "PATH": "/opt/review-env/bin:/usr/local/bin:/usr/bin:/bin",
         "HOME": str(home),
         "CODEX_HOME": str(home / ".codex"),
-        "PYTHONPATH": (
-            f"{workspace}/python-packages:{workspace}/head/.review-packages:{workspace}/head/src"
-        ),
+        "PYTHONPATH": f"{workspace}/python-packages:{workspace}/head/src",
         "PYTHONDONTWRITEBYTECODE": "1",
         "PIP_NO_INDEX": "1",
         "UV_OFFLINE": "1",
@@ -162,6 +202,9 @@ def main():
         "snapshot is /workspace/review/base. Start with git diff --no-index --stat and "
         "--name-status between those directories (exit 1 means differences, not failure). "
         "Read /workspace/review/setup.json for offline package installation results. "
+        "Snapshots, context and setup records are root-owned and read-only. Use "
+        "/workspace/review/scratch for reproductions or writable source copies, and "
+        "keep all review evidence anchored to the canonical head/base snapshots. "
         "Track changed-file coverage and inspect per-file diffs in bounded batches; do not "
         "dump the whole directory diff or context JSON. Read the PR description, relevant "
         "discussion and base CLAUDE.md, then prioritize changed code, tests and focused "
@@ -185,7 +228,7 @@ def main():
         "--output-schema",
         "/tmp/review-schema.json",
         "-o",
-        str(workspace / "result.json"),
+        str(workspace / "output" / "result.json"),
         "-c",
         'model_reasoning_effort="high"',
         "-c",
@@ -277,7 +320,7 @@ def main():
     with suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
     exit_code = process.wait(timeout=5)
-    result = workspace / "result.json"
+    result = workspace / "output" / "result.json"
     review = (
         json.loads(result.read_text())
         if exit_code == 0 and result.is_file() and result.stat().st_size < 24000

@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 56 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
+- TypeScript and 64 offline policy, ledger, gateway, queue and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
-- Publisher version: `0bab7490-98b0-4d3b-b54c-58c7547f8dc9`.
-- Reviewer version: `e0b9473d-325a-4ee6-9690-73f331a53e3f`.
+- Publisher version: `f8911de7-7b2b-4999-b999-ceb2e6c38fc1`.
+- Reviewer version: `b8b2f1c6-dcbc-458c-987d-4d3e42a27472`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -65,7 +65,7 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Diagnostic run `230721d16d351acd424c9633cb672b40619b430a06f4d553` confirmed $0.244662 remaining in the conservative head ledger. This is not an invoice total: earlier settlement charged every input token at the non-cached ceiling.
 - Corrected future settlement to credit confirmed cache reads at $1/M, added final-turn budget steering, and preserved budget-stop reasons independently of CLI stderr. Existing charges remain unchanged because historical cache usage was not retained.
 - No further paid trial was started after these fixes. A complete end-to-end verdict on PR #456 remains pending additional authorized trial allowance. The $5/head, $15/PR and $200/month limits remain unchanged.
-- Runner version: `d9eae883-166d-48d6-98a5-68ceb1f78d01`.
+- Runner version: `2b88873c-0106-44ce-8886-a8515cacb2f0`.
 
 ## Authorized trial budget exception
 
@@ -150,3 +150,15 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Fresh workflow `d9a2115383a52d40b7ea268bbc84d1ea0f2de0d48fcebdda` completed through launch, saved verdict, cleanup, publication and delivery without recovery. Published REQUEST_CHANGES with three reproduced blockers and 131 passing plugin tests at 100% reported statement/branch coverage.
 - Verified the new comment starts with `**REQUEST_CHANGES**.` and immediately tags the actual opener with `@jeqcho, please address the 3 blocking findings`. Review: https://github.com/robocurve/inspect-robots/pull/456#issuecomment-5756257176 . No original-contributor override was used.
 - The fresh test made 16 model calls, settling $3.168671 plus the $0.100000 sandbox allowance. This run booked $3.268671; cumulative revision usage is $19.488643 of $25, leaving $5.511357. The temporary accounting monitor was stopped after verification.
+
+
+## Durable queue and review integrity: 2026-09-21
+
+- All webhook and manual triggers now share one atomic FIFO admission gate in the SQLite ledger. Workflows wait on Cloudflare and display queued checks without starting containers or reserving model budget. Cleanup acknowledgements fence slot release; recovery retains the same job and execution. No Mac dispatcher is required.
+- Canonical snapshots, context and their parent directories are root-owned and immutable to build and review users. Builds use UID 65533 in a disposable copy; Codex uses UID 65534 with its own home, pre-created CODEX_HOME, scratch and output directory. Setup records remain launcher-owned.
+- Failed workflow and scheduled-recovery hold notices remain in a pending-publication state until GitHub acknowledges delivery. Reconciliation retries delivery without new inference.
+- Incomplete reviews lead with confirmed bugs and fixes when present. The visible Remaining checks checklist names unfinished validation; Checks completed is separate inside the details. REQUIRE_REVIEWER continues to tag jeqcho.
+- TypeScript and 64 Workers/SQLite tests pass. Two offline Linux regressions pass: a real build backend fails all 11 evidence/output tampering attempts while installation and scratch work succeed; the real Codex CLI starts against a local synthetic Responses server and writes its result without any provider key.
+- Initial live queue verification exposed a missing CODEX_HOME directory before model execution. PR404 and PR376 each booked a $0.10 sandbox allowance and zero model calls. Waiting workflows were paused, the directory creation was restored under the review UID, and a real-CLI startup regression was added. No charges or limits were reset.
+- Production publisher: f8911de7-7b2b-4999-b999-ceb2e6c38fc1. Reviewer: b8b2f1c6-dcbc-458c-987d-4d3e42a27472. Runner: 2b88873c-0106-44ce-8886-a8515cacb2f0.
+- The maintainer requires genuine new bot runs for review requests. A temporary saved-comment formatting refresh was removed; requested reruns use fresh review commands and the existing cumulative caps.

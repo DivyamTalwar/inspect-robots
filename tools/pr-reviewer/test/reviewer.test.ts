@@ -52,7 +52,8 @@ describe('review gates', () => {
     expect(validateReview(partial).verdict).toBe('REQUIRE_REVIEWER');
     const text = renderReview(job, partial, false);
     expect(text).toMatch(/^\*\*REQUIRE_REVIEWER\*\*\./);
-    expect(text).toContain('@jeqcho, please arrange completion');
+    expect(text).toContain('@jeqcho, please complete or delegate');
+    expect(text.split('<details>')[0]).toContain('**Remaining checks:**\n\n- [ ] Inspect scorer.py lines 40-90; session ran out of time.');
     expect(text).not.toContain('your decision is needed');
     for (const change of [{ sufficient_review: true }, { recommended_action: 'MERGE' }, { decision_needed: 'Run pytest' }, { limitations: [] }]) expect(() => validateReview({ ...partial, ...change })).toThrow();
   });
@@ -62,6 +63,20 @@ describe('review gates', () => {
     expect(review.verdict).toBe('REQUIRE_REVIEWER');
     expect(renderReview(job, review, false)).toMatch(/^\*\*REQUIRE_REVIEWER\*\*\./);
     expect(() => validateReview({ ...legacy, sufficient_review: true })).toThrow('inconsistent_incomplete');
+  });
+  it('leads incomplete reviews with confirmed bugs and fixes above the collapsed details', () => {
+    const review: Review = { ...approval, verdict: 'REQUIRE_REVIEWER', recommended_action: 'COMPLETE_REVIEW', sufficient_review: false,
+      blockers: [{ file: 'runner.py', line: 144, trigger: 'PR build executes', expected: 'Immutable evidence', actual: 'Build replaces the proposed code with base.', impact: 'Changes disappear.', fix: 'Protect canonical snapshots and their parent directories.' }],
+      limitations: ['Run the integration suite.'] };
+    const body = renderReview(job, validateReview(review), false, [], 'contributor');
+    const top = body.split('<details>')[0];
+    expect(top).toMatch(/^\*\*REQUIRE_REVIEWER\*\*\. Fix the confirmed blocking defect/);
+    expect(top).toContain('@jeqcho, please coordinate fixes');
+    expect(top).toContain('Build replaces the proposed code with base.');
+    expect(top).toContain('Protect canonical snapshots and their parent directories.');
+    expect(top).toContain('then complete the remaining validation');
+    expect(top).toContain('**Remaining checks:**\n\n- [ ] Run the integration suite.');
+    expect(top).not.toContain('please arrange completion');
   });
   it('tags the author for edits and falls back safely when no person can be mentioned', () => {
     const changes = { ...approval, verdict: 'REQUEST_CHANGES', recommended_action: 'REVISE', blockers: [{ file: 'x.py', line: 1, trigger: 'Empty input', expected: 'Valid output', actual: 'Crash', impact: 'Task fails', fix: 'Handle empty input' }] } as Review;

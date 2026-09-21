@@ -7,14 +7,14 @@ const job = { id: 'durability-test', pr: 77, head: 'a'.repeat(40), base: 'b'.rep
 const raw = JSON.stringify({ exitCode: 1, failure: 'codex_review_incomplete', review: null, executions: [] });
 describe('execution records in SQLite', () => {
   it('tracks the recovery workflow rather than the failed original instance', async () => {
-    const ledger = env.LEDGER.getByName(crypto.randomUUID()); await ledger.register(job);
+    const ledger = env.LEDGER.getByName(crypto.randomUUID()); await ledger.register(job); await ledger.claimReviewSlot(job.id);
     expect(await ledger.workflowInstance(job.id)).toBe(job.id);
     await ledger.workflowInstance(job.id, 'recovered-instance');
     await evictDurableObject(ledger);
     expect(await ledger.workflowInstance(job.id)).toBe('recovered-instance');
   });
   it('atomically prepares one execution and charge across concurrent calls and eviction', async () => {
-    const ledger = env.LEDGER.getByName(crypto.randomUUID()); await ledger.register(job);
+    const ledger = env.LEDGER.getByName(crypto.randomUUID()); await ledger.register(job); await ledger.claimReviewSlot(job.id);
     const prepared = await Promise.all(Array.from({ length: 8 }, () => ledger.prepareExecution(job.id, job.base)));
     expect(new Set(prepared.map(v => v.token)).size).toBe(1);
     expect(new Set(prepared.map(v => v.sandbox)).size).toBe(1);
@@ -23,7 +23,7 @@ describe('execution records in SQLite', () => {
     expect(await ledger.remaining(`77-${job.head}`, 77)).toBe(4_900_000);
   });
   it('persists an immutable checkpoint, rejects other capabilities and blocks further model spending', async () => {
-    const ledger = env.LEDGER.getByName(crypto.randomUUID()); await ledger.register(job);
+    const ledger = env.LEDGER.getByName(crypto.randomUUID()); await ledger.register(job); await ledger.claimReviewSlot(job.id);
     const run = await ledger.prepareExecution(job.id, job.base);
     const gateway = new ModelGateway(createExecutionContext(), { LEDGER: { getByName: () => ledger }, OPENAI_API_KEY: 'sk-test' });
     const rejected = await runInDurableObject(ledger, async instance => {
