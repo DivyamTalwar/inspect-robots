@@ -423,6 +423,121 @@ def test_categorical_scorer_with_mean_reducer_degrades_to_error_log(tmp_path: Pa
     assert log.results.metrics == {}  # the failed reducer contributes no metric
 
 
+def test_raising_scorer_degrades_to_error_log(tmp_path: Path) -> None:
+    # Issue #451: scoring runs after the rollout, so an exception escaping a
+    # scorer used to discard every trial that had already been paid for.
+    class _FlakyScorer:
+        name = "flaky"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def __call__(self, record: TrialRecord, target: object) -> object:
+            from inspect_robots.scorer import Score
+
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("scorer bug")
+            return Score(value=True)
+
+    task = _task(epochs=2, scorer=_FlakyScorer())
+    (log,) = eval(task, ScriptedPolicy(), CubePickEmbodiment(), log_dir=str(tmp_path))
+    assert log.status == "error"
+    assert log.error is not None and "scorer 'flaky' failed" in log.error
+    assert log.samples[0].status == "error"
+    assert log.results.total_trials == 2  # the trials that ran are still there
+    assert list(tmp_path.glob("*.json"))  # ...and the log reached disk
+
+
+@pytest.mark.parametrize(
+    "halt",
+    [SafetyAbort("e-stop"), EmbodimentFault("motor stalled")],
+    ids=["safety_abort", "embodiment_fault"],
+)
+def test_scorer_halt_signals_stop_the_eval(tmp_path: Path, halt: Exception) -> None:
+    # The scorer guard must not contain halt signals: swallowing one would let
+    # the next rollout start after an explicit abort or a hardware fault.
+    class _HaltingScorer:
+        name = "halting"
+
+        def __call__(self, record: TrialRecord, target: object) -> object:
+            raise halt
+
+    class _CountingEmbodiment(CubePickEmbodiment):
+        def __init__(self) -> None:
+            super().__init__()
+            self.resets = 0
+
+        def reset(self, scene: Scene, *, seed: int | None = None) -> Observation:
+            self.resets += 1
+            return super().reset(scene, seed=seed)
+
+    task = Task(
+        name="t",
+        scenes=[Scene(id=f"s{i}", instruction="reach", init_seed=i) for i in range(3)],
+        scorer=_HaltingScorer(),  # type: ignore[arg-type]
+        max_steps=60,
+    )
+
+    embodiment = _CountingEmbodiment()
+    with pytest.raises(type(halt)):
+        eval(task, ScriptedPolicy(), embodiment, log_dir=str(tmp_path))
+    assert embodiment.resets == 1  # the scene that halted, and no scene after it
+
+    # eval_set re-raises halts rather than turning them into an error log,
+    # so the remaining tasks must not run either.
+    embodiment = _CountingEmbodiment()
+    with pytest.raises(type(halt)):
+        eval_set([task, task], ScriptedPolicy(), embodiment, log_dir=str(tmp_path))
+    assert embodiment.resets == 1
+
+
+def test_scorer_returning_unconvertible_value_degrades_to_error_log(
+    tmp_path: Path,
+) -> None:
+    # The same guard covers value_to_float(): a scorer can fail by returning a
+    # bad value just as easily as by raising.
+    class _BadValueScorer:
+        name = "bad_value"
+
+        def __call__(self, record: TrialRecord, target: object) -> object:
+            from inspect_robots.scorer import Score
+
+            return Score(value=object())  # type: ignore[arg-type]
+
+    task = _task(scorer=_BadValueScorer())
+    (log,) = eval(task, ScriptedPolicy(), CubePickEmbodiment(), log_dir=str(tmp_path))
+    assert log.status == "error"
+    assert log.error is not None and "scorer 'bad_value' failed" in log.error
+    assert log.results.total_trials == 1
+
+
+def test_one_failing_scorer_keeps_the_others(tmp_path: Path) -> None:
+    # The guard is per scorer, so a sibling scorer's value for the same trial
+    # must survive. Two epochs also drive the repeat-failure path, where the run
+    # is already "error" and only the scene detail accumulates.
+    class _BoomScorer:
+        name = "boom"
+
+        def __call__(self, record: TrialRecord, target: object) -> object:
+            raise RuntimeError("boom")
+
+    task = Task(
+        name="t",
+        scenes=[Scene(id="s0", instruction="reach", init_seed=0)],
+        scorer=[_BoomScorer(), success_at_end()],  # type: ignore[list-item]
+        max_steps=60,
+        epochs=2,
+    )
+    (log,) = eval(task, ScriptedPolicy(), CubePickEmbodiment(), log_dir=str(tmp_path))
+    assert log.status == "error"
+    assert "boom" not in log.results.metrics  # the failed scorer contributes none
+    assert "success_at_end" in log.results.metrics  # ...the healthy one still does
+    # The run-level error keeps the first failure; the scene chains both.
+    scene_error = log.samples[0].error
+    assert scene_error is not None and scene_error.count("scorer 'boom' failed") == 2
+
+
 # --------------------------------------------------------------------------- #
 # 2. Errored trials are never scored and cannot poison metrics.
 # --------------------------------------------------------------------------- #
@@ -544,6 +659,21 @@ def test_fail_on_error_true_stops_at_first_error(tmp_path: Path) -> None:
     )
     assert log.status == "error"
     assert log.results.total_trials == 1  # stopped immediately, not after 3 epochs
+
+
+@pytest.mark.parametrize(
+    "invalid_foe", [-1, -0.5, float("nan"), float("inf"), float("-inf"), "invalid"]
+)
+def test_eval_rejects_invalid_fail_on_error(tmp_path: Path, invalid_foe: object) -> None:
+    task = _task(epochs=1)
+    with pytest.raises(ConfigError, match="fail_on_error must be a boolean or finite float >= 0"):
+        eval(
+            task,
+            ScriptedPolicy(),
+            CubePickEmbodiment(),
+            log_dir=str(tmp_path),
+            fail_on_error=invalid_foe,  # type: ignore[arg-type]
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1028,6 +1158,16 @@ def test_eval_set_forwards_before_scoring(tmp_path: Path) -> None:
     assert success
     assert logs[0].samples[0].operator_judgements == ("pass",)
     assert logs[0].results.metrics["operator"] == 1.0
+
+
+def test_eval_set_rejects_empty_task_list(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match=r"eval_set\(\) requires at least one task"):
+        eval_set(
+            [],
+            ScriptedPolicy(),
+            CubePickEmbodiment(),
+            log_dir=str(tmp_path),
+        )
 
 
 def test_eval_observes_parked_once_before_grading(tmp_path: Path) -> None:
