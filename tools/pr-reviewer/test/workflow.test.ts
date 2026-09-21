@@ -193,3 +193,18 @@ describe('scheduled recovery', () => {
     expect(s.create).not.toHaveBeenCalled();
   });
 });
+
+
+it('allows an operator to inspect saved output without inference or publication', async () => {
+  const s = setup(); await s.ledger.register(job);
+  const execution = await s.ledger.prepareExecution(job.id, base);
+  await s.ledger.checkpoint(execution.token, completeOutput);
+  const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+  Object.defineProperty(workflow, 'env', { value: s.config });
+  const output = await workflow.run({ payload: { id: job.id, inspectOutput: true } } as any, s.step as WorkflowStep);
+  expect(JSON.parse(output as string).output.review).toEqual(savedApproval);
+  expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+  expect(s.read).not.toHaveBeenCalled();
+  expect((await s.ledger.job(job.id))?.status).toBe('queued');
+  expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_900_000);
+});

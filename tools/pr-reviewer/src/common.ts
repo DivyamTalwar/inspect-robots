@@ -22,7 +22,7 @@ export const ReviewSchema = z.object({
   limitations: z.array(z.string()).describe('For each material gap, identify the exact files, behavior or checks not verified, why, and the next verification step. Separate incomplete inspection from unavailable hardware or services.'),
   sufficient_review: z.boolean(),
   decision_needed: z.string().max(500).describe('For escalation, the concrete decision and options in at most two short sentences. Otherwise empty.'),
-  body: z.string(),
+  body: z.string().describe('Additional useful evidence only. Leave empty when the summary, findings and checks already cover the review.'),
 });
 export type Review = z.infer<typeof ReviewSchema>;
 export const CostSummary = z.object({
@@ -44,7 +44,7 @@ export type Job = { id: string; pr: number; head: string; base: string; scope: s
 
 export function validateReview(value: unknown): Review {
   const r = ReviewSchema.parse(value);
-  if (JSON.stringify(r).length > 24000 || !r.body.trim() || !r.rationale.trim()) throw new Error('invalid_review');
+  if (JSON.stringify(r).length > 24000 || !r.rationale.trim()) throw new Error('invalid_review');
   if (r.verdict === 'APPROVE' && (r.worthwhile !== 'YES' || r.scope !== 'ESTABLISHED' || !r.sufficient_review || r.blockers.length || r.recommended_action !== 'MERGE' || r.decision_needed.trim())) throw new Error('inconsistent_approval');
   if (r.verdict === 'REQUEST_CHANGES' && (!r.blockers.length || r.recommended_action !== 'REVISE' || r.scope !== 'ESTABLISHED' || r.worthwhile !== 'YES' || !r.sufficient_review)) throw new Error('inconsistent_changes');
   if (r.verdict === 'ESCALATE' && (!r.decision_needed.trim() || !['CLOSE', 'NEEDS_DECISION'].includes(r.recommended_action))) throw new Error('inconsistent_escalation');
@@ -105,7 +105,7 @@ export function renderReview(job: Job, review: Review, ciGreen: boolean, executi
   else if (review.verdict === 'ESCALATE') body += `\n\n@jeqcho, ${review.recommended_action === 'CLOSE' ? 'please decide whether to close this PR. ' : 'your decision is needed. '}${publicText(review.decision_needed).replace(/\s+/g, ' ').trim()}`;
   else if (review.verdict === 'INCOMPLETE') body += '\n\nThe reviewer could not finish. The outstanding checks are listed below; no merge or closure recommendation was issued. This does not require a product decision.';
   else body += `\n\nPlease address the ${review.blockers.length === 1 ? 'blocking finding' : `${review.blockers.length} blocking findings`} detailed below.`;
-  body += `\n\n<details>\n<summary>Review details, findings and checks</summary>\n\nAutomated independent review of commit \`${job.head}\` (base \`${job.base}\`).\n\nWorthwhile: ${review.worthwhile}\nScope: ${review.scope}\nRecommendation: ${review.recommended_action}\n\n${publicText(review.body)}\n\nContracts and tests: ${publicText(review.contract_and_test_review)}`;
+  body += `\n\n<details>\n<summary>Review details, findings and checks</summary>\n\nAutomated independent review of commit \`${job.head}\` (base \`${job.base}\`).\n\nWorthwhile: ${review.worthwhile}\nScope: ${review.scope}\nRecommendation: ${review.recommended_action}\n\n${review.body.trim() ? publicText(review.body) + '\n\n' : ''}Contracts and tests: ${publicText(review.contract_and_test_review)}`;
   for (const b of review.blockers) body += `\n\n${publicText(b.file)}:${b.line}: ${publicText(b.trigger)}\nExpected: ${publicText(b.expected)}\nObserved from code: ${publicText(b.actual)}\nImpact: ${publicText(b.impact)}\nSuggested fix: ${publicText(b.fix)}`;
   body += `\n\nChecks: ${publicText(review.checks.join('; '))}\n\n${executions.length ? 'Sandbox execution records (CI is checked separately):\n' : 'No sandbox commands were executed; CI is checked separately.'}`;
   for (const execution of executions.slice(0, 10)) body += `\n- Revision ${execution.revision.slice(0, 12)}, exit ${execution.exitCode ?? 'unknown'}${execution.limit ? `, ${publicText(execution.limit)}` : ''}: ${publicText(execution.command.slice(0, 500)).replace(/\n/g, ' ')}`;

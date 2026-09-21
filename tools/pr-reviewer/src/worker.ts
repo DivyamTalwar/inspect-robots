@@ -43,13 +43,17 @@ export async function handleWebhook(request: Request, env: WebhookEnvironment): 
   return new Response('Accepted', { status: 202 });
 }
 
-export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string; inspectOnly?: boolean }> {
-  async run(event: WorkflowEvent<{ id: string; inspectOnly?: boolean }>, step: WorkflowStep) {
+export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string; inspectOnly?: boolean; inspectOutput?: boolean }> {
+  async run(event: WorkflowEvent<{ id: string; inspectOnly?: boolean; inspectOutput?: boolean }>, step: WorkflowStep) {
     const ledger = this.env.LEDGER.getByName('budget');
     const job: Job | null = JSON.parse(await step.do('load job', async () => JSON.stringify(await ledger.job(event.payload.id))));
     if (!job) throw new Error('unknown_job');
     // Cloudflare management API only; never accepted from a webhook or PR text.
     if (event.payload.inspectOnly === true) return ledger.costs(job.id);
+    if (event.payload.inspectOutput === true) {
+      const raw = await ledger.runOutput(job.id);
+      return JSON.stringify({ output: raw === null ? null : JSON.parse(raw), cost_summary: await ledger.costs(job.id) });
+    }
     try {
       if (this.env.ENABLED !== 'true') throw new Error('reviewer_disabled');
       await step.do('start', async () => {

@@ -20,6 +20,15 @@ describe('review gates', () => {
     expect(validateReview(approval).verdict).toBe('APPROVE');
     for (const change of [{ scope: 'NEED_REVIEWER' }, { worthwhile: 'NO' }, { sufficient_review: false }, { recommended_action: 'CLOSE' }, { decision_needed: 'Choose API' }]) expect(() => validateReview({ ...approval, ...change })).toThrow();
   });
+  it('accepts empty supplemental prose without requiring repeated evidence', () => {
+    const review = validateReview({ ...approval, body: '' });
+    const text = renderReview(job, review, true);
+    expect(text).toContain('TL;DR:** APPROVE. Confirmed bug fix.');
+    expect(text).toContain('Contracts and tests: Tests preserve contracts.');
+    expect(text).not.toContain('\n\n\n');
+    expect(() => validateReview({ ...review, rationale: ' ' })).toThrow('invalid_review');
+    expect(() => validateReview({ ...review, sufficient_review: false })).toThrow('inconsistent_approval');
+  });
   it('requires a concrete decision for escalation and a blocker for changes', () => {
     expect(() => validateReview({ ...approval, verdict: 'ESCALATE', recommended_action: 'CLOSE' })).toThrow();
     expect(() => validateReview({ ...approval, verdict: 'REQUEST_CHANGES', recommended_action: 'REVISE' })).toThrow();

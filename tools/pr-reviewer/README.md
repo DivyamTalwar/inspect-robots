@@ -223,6 +223,12 @@ npx wrangler workflows trigger inspect-robots-review '{"id":"EXISTING_RUN_ID","i
 npx wrangler workflows instances describe inspect-robots-review RETURNED_INSTANCE_ID --json
 ```
 
+Operators can also use `"inspectOutput":true` instead of `"inspectOnly":true` to
+read a saved terminal artifact and its costs when diagnosing validation failures.
+This does not launch a process or publish a comment. To recover after a validator
+fix, create a workflow instance with the original job ID; saved-output recovery
+reuses that result without inference.
+
 This management-only diagnostic also works for historical run charge IDs. It
 does not reset charges, change limits, or accept parameters from PR text.
 

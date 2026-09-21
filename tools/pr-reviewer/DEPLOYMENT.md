@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 51 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
+- TypeScript and 54 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
-- Publisher version: `37cd6349-4e41-4423-9e30-1c9c438af6a9`.
-- Reviewer version: `5654f1a3-9285-49cd-94f4-ed4a2a0facca`.
+- Publisher version: `33c91289-7c0e-42ee-8aa9-3319b40d0fe5`.
+- Reviewer version: `55ff476f-6cdb-4305-8bb7-9ee0b419efe6`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -133,3 +133,6 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - The maintainer requested another budget increase and one fresh review. Raised only PR456's lifetime cap and head `696fbaa9a00d7c345a81dd179fa10934f51ade89` to $25 cumulative, leaving $11.942520 before launch. Existing charges remain intact. Other heads retain $5, other PRs retain $15 lifetime, and the shared monthly cap remains $200.
 - Added deployment-only PR lifetime exceptions, validated against the monthly cap. TypeScript and all 52 Workers/SQLite tests passed, including concurrent reservations, the exact-head restriction, unchanged defaults for other PRs, and the shared monthly ceiling.
 - Deployed reviewer `5654f1a3-9285-49cd-94f4-ed4a2a0facca`. Read-only `cap25-budget-audit` verified the preserved $13.057480 usage and $11.942520 remaining. A single `/review` command started workflow `82b6d76a1771181c06ccb05cf0eda0a4681a6b4b12be06f1` on the unchanged PR456 head.
+- The fresh model run completed successfully and persisted REQUEST_CHANGES with two reproduced blockers, 32 command records and reported inspection of all 39 files. The 131-test plugin suite passed. Publication initially stopped because the validator required nonempty supplemental prose even though the review policy asks the agent not to repeat evidence already present in other fields.
+- Corrected this presentation mismatch: supplemental body text may be empty, while a nonempty summary and all substantive verdict/approval checks remain required. Added a management-only `inspectOutput` diagnostic to read saved output without inference or publication. The recovered live artifact passes the corrected validator; all 54 Workers/SQLite tests pass.
+- Deployed reviewer `55ff476f-6cdb-4305-8bb7-9ee0b419efe6` and publisher `33c91289-7c0e-42ee-8aa9-3319b40d0fe5`. Saved output will be replayed using the original job ID, without another model call.
