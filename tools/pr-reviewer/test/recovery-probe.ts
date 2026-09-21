@@ -19,7 +19,7 @@ export class ProbeStats extends DurableObject {
 }
 const head = '696fbaa9a00d7c345a81dd179fa10934f51ade89';
 const base = '4d35fe4b81a643c0e61e8d287810b3c26f9d386a';
-const fixture = { worthwhile: 'YES', scope: 'ESTABLISHED', verdict: 'INCOMPLETE', recommended_action: 'COMPLETE_REVIEW', rationale: 'Synthetic recovery probe. This is not a PR review.', blockers: [], contract_and_test_review: 'Infrastructure test only.', checks: [], limitations: ['No real model reviewed this PR.'], sufficient_review: false, decision_needed: '', body: 'Injected output for transport validation; never publish to GitHub.' };
+const fixture = { worthwhile: 'YES', scope: 'ESTABLISHED', verdict: 'REQUIRE_REVIEWER', recommended_action: 'COMPLETE_REVIEW', rationale: 'Synthetic recovery probe. This is not a PR review.', blockers: [], contract_and_test_review: 'Infrastructure test only.', checks: [], limitations: ['No real model reviewed this PR.'], sufficient_review: false, decision_needed: '', body: 'Injected output for transport validation; never publish to GitHub.' };
 export class ProbeModel extends WorkerEntrypoint<ProbeEnv> {
   async deliverCheckpoint(receipt: string, body: string) { await this.env.LEDGER.getByName('budget').deliverCheckpoint(receipt, body); }
   async checkpoint(token: string, body: string) { await this.env.LEDGER.getByName('budget').checkpoint(token, body); }

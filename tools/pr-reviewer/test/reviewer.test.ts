@@ -23,7 +23,7 @@ describe('review gates', () => {
   it('accepts empty supplemental prose without requiring repeated evidence', () => {
     const review = validateReview({ ...approval, body: '' });
     const text = renderReview(job, review, true);
-    expect(text).toContain('TL;DR:** APPROVE. Confirmed bug fix.');
+    expect(text).toMatch(/^\*\*APPROVE\*\*\. Confirmed bug fix\./);
     expect(text).toContain('Contracts and tests: Tests preserve contracts.');
     expect(text).not.toContain('\n\n\n');
     expect(() => validateReview({ ...review, rationale: ' ' })).toThrow('invalid_review');
@@ -34,25 +34,49 @@ describe('review gates', () => {
     expect(() => validateReview({ ...approval, verdict: 'REQUEST_CHANGES', recommended_action: 'REVISE' })).toThrow();
   });
   it('only asks Jay to merge when this revision has green CI', () => {
-    expect(renderReview(job, approval, false)).not.toContain('@jeqcho');
+    expect(renderReview(job, approval, false)).toContain('@jeqcho, review approved. Waiting for ci-ok before requesting a merge.');
+    expect(renderReview(job, approval, false)).not.toContain('Please review and merge');
     const merged = renderReview(job, approval, true);
-    expect(merged).toMatch(/^\*\*TL;DR:\*\* APPROVE\. Confirmed bug fix\./);
+    expect(merged).toMatch(/^\*\*APPROVE\*\*\. Confirmed bug fix\./);
     expect(merged).toContain('@jeqcho');
     expect(merged.indexOf('@jeqcho')).toBeLessThan(merged.indexOf('<details>'));
     expect(merged.split(approval.rationale)).toHaveLength(2);
     expect(merged).toContain(approval.contract_and_test_review);
     const escalated = renderReview(job, { ...approval, verdict: 'ESCALATE', recommended_action: 'CLOSE', decision_needed: 'The existing plan excludes this dependency.' }, false);
+    expect(escalated).toMatch(/^\*\*ESCALATE\*\*\./);
     expect(escalated).toContain('@jeqcho, please decide whether to close');
     expect(escalated.indexOf('The existing plan excludes this dependency.')).toBeLessThan(escalated.indexOf('<details>'));
   });
   it('separates incomplete technical review from a human decision', () => {
-    const partial: Review = { ...approval, verdict: 'INCOMPLETE', recommended_action: 'COMPLETE_REVIEW', sufficient_review: false, limitations: ['Inspect scorer.py lines 40-90; session ran out of time.'] };
-    expect(validateReview(partial).verdict).toBe('INCOMPLETE');
+    const partial: Review = { ...approval, verdict: 'REQUIRE_REVIEWER', recommended_action: 'COMPLETE_REVIEW', sufficient_review: false, limitations: ['Inspect scorer.py lines 40-90; session ran out of time.'] };
+    expect(validateReview(partial).verdict).toBe('REQUIRE_REVIEWER');
     const text = renderReview(job, partial, false);
-    expect(text).toContain('TL;DR:** INCOMPLETE');
-    expect(text).not.toContain('@jeqcho');
+    expect(text).toMatch(/^\*\*REQUIRE_REVIEWER\*\*\./);
+    expect(text).toContain('@jeqcho, please arrange completion');
     expect(text).not.toContain('your decision is needed');
     for (const change of [{ sufficient_review: true }, { recommended_action: 'MERGE' }, { decision_needed: 'Run pytest' }, { limitations: [] }]) expect(() => validateReview({ ...partial, ...change })).toThrow();
+  });
+  it('renders saved legacy unfinished reviews with the new status and the same safeguards', () => {
+    const legacy = { ...approval, verdict: 'INCOMPLETE', recommended_action: 'COMPLETE_REVIEW', sufficient_review: false, limitations: ['Remaining code needs inspection.'] };
+    const review = validateReview(legacy);
+    expect(review.verdict).toBe('REQUIRE_REVIEWER');
+    expect(renderReview(job, review, false)).toMatch(/^\*\*REQUIRE_REVIEWER\*\*\./);
+    expect(() => validateReview({ ...legacy, sufficient_review: true })).toThrow('inconsistent_incomplete');
+  });
+  it('tags the author for edits and falls back safely when no person can be mentioned', () => {
+    const changes = { ...approval, verdict: 'REQUEST_CHANGES', recommended_action: 'REVISE', blockers: [{ file: 'x.py', line: 1, trigger: 'Empty input', expected: 'Valid output', actual: 'Crash', impact: 'Task fails', fix: 'Handle empty input' }] } as Review;
+    for (const author of ['Sravanthi6m', 'a', 'test-author']) {
+      const text = renderReview(job, validateReview(changes), true, [], author);
+      expect(text).toMatch(/^\*\*REQUEST_CHANGES\*\*\./);
+      expect(text).toContain(`@${author}, please address the blocking finding`);
+      expect(text.indexOf(`@${author}`)).toBeLessThan(text.indexOf('<details>'));
+      expect(text).not.toContain('@jeqcho');
+    }
+    for (const author of ['', 'ghost', 'dependabot[bot]', 'name @victim', 'org/team', 'a'.repeat(40)]) {
+      const text = renderReview(job, changes, true, [], author);
+      expect(text).toContain('@jeqcho, please coordinate fixes');
+      expect(text).not.toContain('@victim');
+    }
   });
   it('neutralizes untrusted mentions, links and hidden markup', () => {
     const output = publicText('<!-- hidden --><img src=x> @jeqcho ![secret](https://bad.test/key) https://bad.test');
@@ -199,7 +223,7 @@ describe('actionable hold notices', () => {
     for (const error of [new Error('Authorization: Bearer sk-private'), new Error('file_too_large:{"path":"@victim <img>","size":42}'), new Error('file_too_large:malformed')]) {
       const body = renderHold(job, holdReason(error));
       expect(body).not.toMatch(/sk-private|@victim|<img>|malformed/);
-      expect(body).toContain('no verdict issued');
+      expect(body).toMatch(/^\*\*REQUIRE_REVIEWER\*\*\. No verdict issued\./);
     }
     expect(renderHold(job, { code: 'review_failed', path: '@victim' })).not.toContain('@victim');
   });
@@ -234,8 +258,14 @@ describe('publisher authority', () => {
     expect(await publisher.publish(job, approval)).toBe(true);
     expect(writes.map(w => w.path)).toEqual(['/repos/robocurve/inspect-robots/check-runs', '/repos/robocurve/inspect-robots/issues/9/comments']);
     expect(writes[1].body.body).toContain('@jeqcho');
+    expect(writes[1].body.body).toMatch(/^\*\*APPROVE\*\*\./);
+    expect(writes[1].body.body).toMatch(/<!-- inspect-robots-review:revision-1 -->$/);
+    const changes = { ...approval, verdict: 'REQUEST_CHANGES', recommended_action: 'REVISE', blockers: [{ file: 'x.py', line: 1, trigger: 'Empty input', expected: 'Output', actual: 'Crash', impact: 'Failure', fix: 'Handle input' }], author: 'attacker' };
+    expect(await publisher.publish(job, changes)).toBe(true);
+    expect(writes[3].body.body).toContain('@contributor, please address');
+    expect(writes[3].body.body).not.toContain('@attacker');
     live = { ...pr, head: { sha: base } };
     expect(await publisher.publish(job, approval)).toBe(false);
-    expect(writes).toHaveLength(2);
+    expect(writes).toHaveLength(4);
   });
 });

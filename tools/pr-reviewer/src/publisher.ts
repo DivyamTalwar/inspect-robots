@@ -17,7 +17,8 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
     if (!Number.isSafeInteger(job.pr) || job.pr < 1 || !SHA.test(job.head) || !SHA.test(job.base) || !/^[a-z0-9-]{1,100}$/.test(job.id)) throw new Error('invalid_publication');
     const token = await installationToken(this.env, true);
     const read = (p: string) => github(token, `/repos/${REPO}${p}`);
-    if (!current(job, snapshot(await read(`/pulls/${job.pr}`)))) return false;
+    const pr = snapshot(await read(`/pulls/${job.pr}`));
+    if (!current(job, pr)) return false;
     let body: string;
     let conclusion: 'success' | 'failure' | 'action_required' | undefined;
     if (notice === 'started') {
@@ -31,7 +32,7 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
     } else {
       const review = validateReview(result);
       const executions = ExecutionRecords.parse(result && typeof result === 'object' && 'execution_records' in result ? result.execution_records : []);
-      body = renderReview(job, review, await ciGreen(read, job.head), executions);
+      body = renderReview(job, review, await ciGreen(read, job.head), executions, pr.author);
       conclusion = review.verdict === 'APPROVE' ? 'success' : review.verdict === 'REQUEST_CHANGES' ? 'failure' : 'action_required';
     }
     if (result && typeof result === 'object' && 'cost_summary' in result) body += renderCost(result.cost_summary);
@@ -54,7 +55,7 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
       if (page === 10) throw new Error('comment_pagination_limit');
     }
     if (!current(job, snapshot(await read(`/pulls/${job.pr}`)))) return false;
-    const text = `${marker}\n${body}`;
+    const text = `${body}\n\n${marker}`;
     if (previous?.body === text) return true;
     await github(token, `/repos/${REPO}/${previous ? `issues/comments/${previous.id}` : `issues/${job.pr}/comments`}`, previous ? 'PATCH' : 'POST', { body: text });
     return true;

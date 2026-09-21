@@ -49,5 +49,5 @@ export function renderHold(job: Job, details: unknown): string {
   const [summary, next] = reasons[reason.code];
   const specific = reason.code === 'file_too_large' && reason.path && reason.size !== undefined
     ? `File \`${reason.path}\` is ${reason.size.toLocaleString('en-US')} bytes; the reviewer’s per-file limit is 100,000 bytes.` : summary;
-  return `**TL;DR:** Review incomplete; no verdict issued. ${specific}\n\n**Next step:** @jeqcho, ${next.charAt(0).toLowerCase()}${next.slice(1)}\n\nThis is a limitation or failure of the reviewer, not a finding against the contribution. No approval, merge or closure recommendation was issued.\n\nCommit: \`${job.head}\`\nRun reference: \`${job.id}\`. Reason: \`${reason.code}\`.`;
+  return `**REQUIRE_REVIEWER**. No verdict issued. ${specific}\n\n**Next step:** @jeqcho, ${next.charAt(0).toLowerCase()}${next.slice(1)}\n\nThis is a limitation or failure of the reviewer, not a finding against the contribution. No approval, merge or closure recommendation was issued.\n\nCommit: \`${job.head}\`\nRun reference: \`${job.id}\`. Reason: \`${reason.code}\`.`;
 }

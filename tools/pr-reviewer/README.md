@@ -13,15 +13,21 @@ PR content cannot replace it.
 | Verdict | Meaning | Next step |
 | --- | --- | --- |
 | APPROVE | Worthwhile, established scope, sufficient evidence, no blockers | Tag `@jeqcho` to merge after `ci-ok` is green on the reviewed head |
-| REQUEST_CHANGES | Established scope with concrete implementation defects | Explain the trigger, expected/actual behavior, impact and fix |
+| REQUEST_CHANGES | Established scope with concrete implementation defects | Tag the PR author with the trigger, expected/actual behavior, impact and fix |
 | ESCALATE | Scope, necessity or competing proposals need human judgment | Tag `@jeqcho` with a precise decision; closure is only a recommendation |
-| INCOMPLETE | Inspection or checks could not finish | List remaining checks; no request for a product decision |
+| REQUIRE_REVIEWER | Inspection or checks could not finish | Tag `@jeqcho` to arrange completion of the remaining checks; no product decision |
 
-Comments start with a one- or two-sentence TL;DR describing the change and the
-reason for the verdict, followed immediately by the requested action. Detailed
+Every review starts with its uppercase status: **APPROVE**, **REQUEST_CHANGES**,
+**ESCALATE** or **REQUIRE_REVIEWER**. A one- or two-sentence summary follows, describing
+the change and the reason for the verdict, then the tagged next action.
+Service failures use **REQUIRE_REVIEWER** too; hidden tracking metadata goes at the end. Detailed
 findings, immutable head/base, contract review, tests and command records are
 in an expandable section. Scope and value decisions requiring a human use
 `NEED_REVIEWER`; escalation and merge requests still mention `@jeqcho`.
+Every final review names an action owner. Approvals awaiting CI still tag
+`@jeqcho`, with the merge request deferred until CI passes. Service failures and
+budget holds tag `@jeqcho`. Author mentions come from GitHub PR metadata; missing,
+deleted or bot-only author accounts fall back to `@jeqcho` to coordinate changes.
 They disclose automation and record actual sandbox commands separately from CI. Contributor
 intent and personal characteristics are never grounds for a finding.
 
@@ -131,7 +137,7 @@ the conservative $13/M ceiling. Reservations never assume a future cache hit.
 The gateway supplies the remaining budget each turn and requests a final answer
 when less than $0.30 remains after reserving the current uncached input. It no
 longer requires space for two full uncached histories before allowing investigation.
-If material evidence is missing, the result is INCOMPLETE, not a product escalation. The ledger can still reach its limit before
+If material evidence is missing, the result is REQUIRE_REVIEWER, not a product escalation. The ledger can still reach its limit before
 the OpenAI bill does. See [Astra pricing](https://developers.openai.com/api/docs/models/gpt-6-astra).
 
 Fresh runs require at least $2 remaining before any sandbox/model spending. This

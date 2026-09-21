@@ -138,3 +138,11 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Deployed reviewer `55ff476f-6cdb-4305-8bb7-9ee0b419efe6` and publisher `33c91289-7c0e-42ee-8aa9-3319b40d0fe5`. Recovery workflow `cap25-recover-verdict` reused the original job and saved output, skipped process launch and polling, and successfully published REQUEST_CHANGES. No additional model call occurred.
 - Final published review: https://github.com/robocurve/inspect-robots/pull/456#issuecomment-5756059575 . Two reproduced blockers concern scoring an unreleased cube and applying intersected arm bounds to an individual arm. The service issued no approval or merge/closure recommendation.
 - Final accounting: 15 model calls, $3.062492 settled model usage, $0.100000 sandbox allowance, no unresolved reservations. This run booked $3.162492; cumulative revision spending is $16.219972 of $25, leaving $8.780028. Saved-result recovery did not add charges. These are conservative ledger totals, not invoice amounts.
+
+
+## Review statuses and action owners
+
+- Every final review begins with APPROVE, REQUEST_CHANGES, ESCALATE or REQUIRE_REVIEWER, followed by a short summary and tagged next action. Service failures use REQUIRE_REVIEWER; saved legacy INCOMPLETE results remain readable and render with the new name. Hidden tracking metadata moves to the end of comments.
+- REQUEST_CHANGES tags the actual PR opener from GitHub metadata. All other verdicts tag @jeqcho. Approvals awaiting CI mention Jay without requesting a merge until CI passes. Unmentionable, missing or deleted author accounts fall back to Jay to coordinate fixes.
+- PR456 was opened by jeqcho, so its edit requests consistently tag @jeqcho. No original-contributor exception is configured.
+- TypeScript and all 56 Workers/SQLite tests pass, including status prefixes, trusted author selection, mention-injection rejection, CI gating and legacy saved-result compatibility.
