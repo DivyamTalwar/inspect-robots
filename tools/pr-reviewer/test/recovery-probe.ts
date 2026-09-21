@@ -31,7 +31,7 @@ export class ProbeModel extends WorkerEntrypoint<ProbeEnv> {
   async respond(token: string, body: string) {
     const ledger = this.env.LEDGER.getByName('budget');
     if (!await ledger.session(token)) return new Response('Forbidden', { status: 403 });
-    const count = await this.env.STATS.getByName('probe-v3').increment('modelTurns');
+    const count = await this.env.STATS.getByName('probe-v4').increment('modelTurns');
     const request = JSON.parse(body);
     let events;
     const response = { id: `resp_probe_${count}`, object: 'response', created_at: 1, status: 'completed', model: 'gpt-6-astra', usage: { input_tokens: 10, output_tokens: 10, total_tokens: 20 } };
@@ -65,13 +65,13 @@ export class ProbeModel extends WorkerEntrypoint<ProbeEnv> {
 export class RecoveryProbe extends WorkflowEntrypoint<ProbeEnv, { replay?: boolean }> {
   async run(_event: WorkflowEvent<{ replay?: boolean }>, step: WorkflowStep) {
     const ledger = this.env.LEDGER.getByName('budget');
-    const job: Job = { id: 'recovery-probe-v3', pr: 999999, head, base, scope: '', status: 'running', result: null, created: 1, notified: 0 };
+    const job: Job = { id: 'recovery-probe-v4', pr: 999999, head, base, scope: '', status: 'running', result: null, created: 1, notified: 0 };
     await ledger.register(job); await ledger.claimReviewSlot(job.id);
     const wrapped = {
       do: (async (name: string, config: unknown, callback: unknown) => {
         const value = await Reflect.apply(step.do, step, [name, config, callback]);
         if (name.startsWith('inspect reviewer process') && value === 'complete') {
-          await this.env.STATS.getByName('probe-v3').increment('recoveryFaults');
+          await this.env.STATS.getByName('probe-v4').increment('recoveryFaults');
           throw new Error('injected lost workflow acknowledgement');
         }
         return value;
@@ -86,12 +86,12 @@ export class RecoveryProbe extends WorkflowEntrypoint<ProbeEnv, { replay?: boole
         return '[]';
       } },
       RUNNER: {
-        start: async (...args) => { await this.env.STATS.getByName('probe-v3').increment('launches'); await this.env.RUNNER.start(...args); },
+        start: async (...args) => { await this.env.STATS.getByName('probe-v4').increment('launches'); await this.env.RUNNER.start(...args); },
         poll: async (...args) => { const complete = await this.env.RUNNER.poll(...args); if (complete) throw new Error('injected lost completion acknowledgement'); return false; },
         cleanup: async (...args) => { await this.env.RUNNER.cleanup(...args); throw new Error('injected lost cleanup acknowledgement'); },
       },
     }, job, wrapped);
-    return JSON.stringify({ synthetic: true, verdict: result.verdict, executions: result.execution_records, costs: result.cost_summary, ...await this.env.STATS.getByName('probe-v3').counts() });
+    return JSON.stringify({ synthetic: true, verdict: result.verdict, executions: result.execution_records, costs: result.cost_summary, ...await this.env.STATS.getByName('probe-v4').counts() });
   }
 }
 export default { fetch() { return new Response('Not found', { status: 404 }); } };

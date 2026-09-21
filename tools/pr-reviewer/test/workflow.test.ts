@@ -33,6 +33,21 @@ async function webhook(body: any, event: string) {
 const repo = { repository: { full_name: 'robocurve/inspect-robots' }, installation: { id: 163290338 } };
 
 describe('webhook dispatch', () => {
+  it('requeues the latest revision when a waiting snapshot becomes stale before admission', async () => {
+    const s = setup(); await s.ledger.register(job);
+    const read = s.read.getMockImplementation()!;
+    const newHead = 'c'.repeat(40);
+    s.read.mockImplementation(async p => p === '/pulls/9' ? JSON.stringify({ ...pr, head: { sha: newHead } }) : read(p));
+    const publish = vi.fn(async () => false);
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: { ...s.config, PUBLISHER: { ...s.config.PUBLISHER, publish } } });
+    await workflow.run({ instanceId: job.id, payload: { id: job.id } } as any, s.step as WorkflowStep);
+    expect((await s.ledger.job(job.id))?.status).toBe('stale');
+    expect(await s.ledger.pending()).toEqual([expect.objectContaining({ pr: 9, head: newHead, status: 'queued' })]);
+    expect(s.create).toHaveBeenCalledTimes(1);
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+    expect((await s.ledger.costs(job.id)).sandboxMicros).toBe(0);
+  });
   it('rejects unsigned input before any GitHub read', async () => {
     const s = setup();
     const response = await handleWebhook(new Request('https://x/', { method: 'POST', body: '{}' }), s.config);

@@ -43,9 +43,25 @@ export async function handleWebhook(request: Request, env: WebhookEnvironment): 
   return new Response('Accepted', { status: 202 });
 }
 
-export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean }> {
-  async run(event: WorkflowEvent<{ id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean }>, step: WorkflowStep) {
+export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean; pauseReviews?: boolean }> {
+  async run(event: WorkflowEvent<{ id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean; pauseReviews?: boolean }>, step: WorkflowStep) {
     const ledger = this.env.LEDGER.getByName('budget');
+    if (event.payload.pauseReviews !== undefined) {
+      // Operator-only management invocation. Never taken from a GitHub webhook.
+      await ledger.pauseReviewQueue(event.payload.pauseReviews);
+      const owner = (await ledger.queueState()).owner;
+      if (event.payload.pauseReviews && owner) {
+        const execution = await ledger.execution(owner);
+        if (execution) {
+          await ledger.closeSession(execution.token);
+          await this.env.RUNNER.cleanup(execution.sandbox);
+          await ledger.sandboxCleaned(owner);
+        }
+        await ledger.finish(owner, 'security_stopped');
+        await ledger.releaseReviewSlot(owner);
+      }
+      return ledger.queueState();
+    }
     if (event.payload.inspectQueue === true) return ledger.queueState();
     const job: Job | null = JSON.parse(await step.do('load job', async () => JSON.stringify(await ledger.job(event.payload.id))));
     if (!job) throw new Error('unknown_job');
@@ -59,7 +75,10 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
       if (this.env.ENABLED !== 'true') throw new Error('reviewer_disabled');
       await step.do('record workflow instance', () => ledger.workflowInstance(job.id, event.instanceId));
       if (!await step.do('publish queued check', () => this.env.PUBLISHER.publish(job, null, 'queued'))) {
-        await step.do('mark stale before admission', () => ledger.finish(job.id, 'stale'));
+        await step.do('mark stale before admission', async () => {
+          await ledger.finish(job.id, 'stale');
+          await enqueue(this.env, job.pr);
+        });
         return;
       }
       // Waiting is durable Workflow sleep, not a running container or model call.
@@ -70,6 +89,7 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
           const live = snapshot(await read(this.env, `/pulls/${job.pr}`));
           if (!current(job, live)) {
             await ledger.finish(job.id, 'stale');
+            await enqueue(this.env, job.pr);
             return 'obsolete';
           }
           return ledger.claimReviewSlot(job.id);

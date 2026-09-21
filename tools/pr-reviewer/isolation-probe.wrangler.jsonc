@@ -1,42 +1,19 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "inspect-robots-review-recovery-probe",
+  "name": "inspect-robots-review-isolation-probe",
   "account_id": "7f405baff0972dc740a02ee0f700d2c1",
-  "main": "test/recovery-probe.ts",
+  "main": "test/isolation-probe.ts",
   "compatibility_date": "2026-09-20",
   "compatibility_flags": [
     "nodejs_compat"
   ],
   "workers_dev": false,
   "preview_urls": false,
-  "vars": {
-    "REVIEW_HEAD_LIMITS_JSON": "{}"
-  },
-  "services": [
-    {
-      "binding": "RUNNER",
-      "service": "inspect-robots-review-recovery-probe",
-      "entrypoint": "CodeRunner"
-    },
-    {
-      "binding": "MODEL",
-      "service": "inspect-robots-review-recovery-probe",
-      "entrypoint": "ProbeModel"
-    }
-  ],
   "durable_objects": {
     "bindings": [
       {
-        "name": "LEDGER",
-        "class_name": "ReviewLedger"
-      },
-      {
         "name": "SANDBOX",
-        "class_name": "ReviewSandbox"
-      },
-      {
-        "name": "STATS",
-        "class_name": "ProbeStats"
+        "class_name": "IsolationSandbox"
       }
     ]
   },
@@ -44,15 +21,13 @@
     {
       "tag": "v1",
       "new_sqlite_classes": [
-        "ReviewLedger",
-        "ReviewSandbox",
-        "ProbeStats"
+        "IsolationSandbox"
       ]
     }
   ],
   "containers": [
     {
-      "class_name": "ReviewSandbox",
+      "class_name": "IsolationSandbox",
       "image": "registry.cloudflare.com/7f405baff0972dc740a02ee0f700d2c1/inspect-robots-review-runner-reviewsandbox:faf4ba9d",
       "instance_type": "basic",
       "max_instances": 1
@@ -61,15 +36,15 @@
   "workflows": [
     {
       "binding": "PROBE",
-      "name": "inspect-review-recovery-probe",
-      "class_name": "RecoveryProbe"
+      "name": "inspect-review-isolation-probe",
+      "class_name": "IsolationProbe"
     }
   ],
   "rules": [
     {
       "type": "Text",
       "globs": [
-        "**/*.md"
+        "**/*.py"
       ],
       "fallthrough": true
     }

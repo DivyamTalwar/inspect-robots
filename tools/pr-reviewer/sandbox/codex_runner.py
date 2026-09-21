@@ -15,6 +15,93 @@ from contextlib import suppress
 from pathlib import Path
 
 
+def tool_permissions(workspace):
+    """Native Codex mount/PID/network sandbox; no unsandboxed fallback."""
+    paths = {
+        "/": "read",
+        str(workspace / "scratch"): "write",
+        str(workspace / "home"): "deny",
+        str(workspace / "output"): "deny",
+        "/tmp/request.json": "deny",
+        "/tmp/review-output.json": "deny",
+    }
+    filesystem = "{" + ",".join(json.dumps(k) + "=" + json.dumps(v) for k, v in paths.items()) + "}"
+    return [
+        "-c",
+        'default_permissions="review"',
+        "-c",
+        "features.use_linux_sandbox_bwrap=true",
+        "-c",
+        "permissions.review.filesystem=" + filesystem,
+        "-c",
+        "permissions.review.network.enabled=false",
+        "-c",
+        'approval_policy="never"',
+    ]
+
+
+def isolated_build(command):
+    """New network and PID namespaces; drop all privilege before any PR code."""
+    return [
+        "/usr/bin/unshare",
+        "--net",
+        "--pid",
+        "--fork",
+        "--mount-proc",
+        "--mount",
+        "--ipc",
+        "--uts",
+        "--kill-child=KILL",
+        "--",
+        "/usr/bin/setpriv",
+        "--reuid=65533",
+        "--regid=65533",
+        "--clear-groups",
+        "--no-new-privs",
+        "--bounding-set=-all",
+        "--inh-caps=-all",
+        "--ambient-caps=-all",
+        "--",
+        *command,
+    ]
+
+
+def verify_isolation(workspace, environment):
+    """Abort before builds or paid inference if either boundary is unavailable."""
+    for name in ("home/isolation-sentinel", "output/isolation-sentinel"):
+        sentinel = workspace / name
+        sentinel.write_text("client-only")
+        os.chown(sentinel, 65534, 65534)
+        sentinel.chmod(0o600)
+    check = [
+        "/opt/review-env/bin/python",
+        "-I",
+        "-S",
+        "/opt/check-isolation.py",
+        str(workspace),
+        os.readlink("/proc/self/ns/pid"),
+    ]
+    subprocess.run(
+        ["codex", "sandbox", *tool_permissions(workspace), "--", *check, "tool"],
+        cwd=workspace,
+        env=environment,
+        user=65534,
+        group=65534,
+        extra_groups=[],
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+    subprocess.run(
+        isolated_build([*check, "build"]),
+        cwd=workspace,
+        env=environment,
+        check=True,
+        capture_output=True,
+        timeout=30,
+    )
+
+
 def protect_evidence(workspace):
     """Keep snapshots and evidence immutable, including their parent directories.
 
@@ -133,20 +220,18 @@ def prepare_packages(workspace, environment, revision):
         timed_out = False
         with tempfile.TemporaryFile() as log:
             process = subprocess.Popen(
-                command,
+                isolated_build(command),
                 cwd=build,
                 env={
                     **environment,
                     "HOME": str(workspace / "build-home"),
+                    "TMPDIR": str(workspace / "build-home"),
                     "PYTHONPATH": "/opt/review-env/lib/python3.11/site-packages",
                     "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.0",
                 },
                 stdout=log,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
-                user=65533,
-                group=65533,
-                extra_groups=[],
             )
             try:
                 code = process.wait(timeout=min(45, remaining))
@@ -173,6 +258,69 @@ def prepare_packages(workspace, environment, revision):
     return executions
 
 
+def codex_args(workspace, environment, policy, prompt):
+    """Trusted client configuration shared by production and real CLI regressions."""
+    tool_environment = {**environment, "HOME": str(workspace / "scratch")}
+    tool_environment.pop("CODEX_HOME", None)
+    return [
+        "codex",
+        "exec",
+        "--model",
+        "gpt-6-astra",
+        "--ephemeral",
+        "--ignore-user-config",
+        "--ignore-rules",
+        "--skip-git-repo-check",
+        *tool_permissions(workspace),
+        "--json",
+        "--output-schema",
+        "/tmp/review-schema.json",
+        "-o",
+        str(workspace / "output" / "result.json"),
+        "-c",
+        'model_reasoning_effort="high"',
+        "-c",
+        'model_provider="review_gateway"',
+        "-c",
+        'model_providers.review_gateway.name="Budgeted review gateway"',
+        "-c",
+        'model_providers.review_gateway.base_url="http://review-model.local"',
+        "-c",
+        'model_providers.review_gateway.env_http_headers={"X-Review-Token"="REVIEW_MODEL_CAPABILITY"}',
+        "-c",
+        'model_providers.review_gateway.wire_api="responses"',
+        "-c",
+        "model_providers.review_gateway.requires_openai_auth=false",
+        "-c",
+        "model_providers.review_gateway.request_max_retries=0",
+        "-c",
+        "model_providers.review_gateway.stream_max_retries=0",
+        "-c",
+        "model_providers.review_gateway.stream_idle_timeout_ms=900000",
+        "-c",
+        "model_auto_compact_token_limit=200000",
+        "-c",
+        "project_doc_max_bytes=0",
+        "-c",
+        "features.apps=false",
+        "-c",
+        "features.multi_agent=false",
+        "-c",
+        "features.shell_snapshot=false",
+        "-c",
+        'shell_environment_policy.inherit="none"',
+        "-c",
+        "shell_environment_policy.set={"
+        + ",".join(json.dumps(k) + "=" + json.dumps(v) for k, v in tool_environment.items())
+        + "}",
+        "-c",
+        'web_search="disabled"',
+        "-c",
+        "developer_instructions=" + json.dumps(policy),
+        prompt,
+    ]
+
+
 def main():
     """Launch a fresh CLI session and return only validated-shape diagnostics."""
     deadline = time.monotonic() + 1200
@@ -194,7 +342,9 @@ def main():
         "UV_OFFLINE": "1",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         "CI": "1",
+        "TMPDIR": str(workspace / "scratch"),
     }
+    verify_isolation(workspace, environment)
     executions = prepare_packages(workspace, environment, request["head"])
     prompt = (
         "Review the PR described in /workspace/review/context.json using the supplied policy. "
@@ -214,57 +364,11 @@ def main():
         "naming any exact remaining checks and why they could not be completed. "
         "Do not modify GitHub or contact anyone."
     )
-    args = [
-        "codex",
-        "exec",
-        "--model",
-        "gpt-6-astra",
-        "--ephemeral",
-        "--ignore-user-config",
-        "--ignore-rules",
-        "--skip-git-repo-check",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--json",
-        "--output-schema",
-        "/tmp/review-schema.json",
-        "-o",
-        str(workspace / "output" / "result.json"),
-        "-c",
-        'model_reasoning_effort="high"',
-        "-c",
-        'model_provider="review_gateway"',
-        "-c",
-        'model_providers.review_gateway.name="Budgeted review gateway"',
-        "-c",
-        f'model_providers.review_gateway.base_url="http://review-model.local/{request["token"]}"',
-        "-c",
-        'model_providers.review_gateway.wire_api="responses"',
-        "-c",
-        "model_providers.review_gateway.requires_openai_auth=false",
-        "-c",
-        "model_providers.review_gateway.request_max_retries=0",
-        "-c",
-        "model_providers.review_gateway.stream_max_retries=0",
-        "-c",
-        "model_providers.review_gateway.stream_idle_timeout_ms=900000",
-        "-c",
-        "model_auto_compact_token_limit=200000",
-        "-c",
-        "project_doc_max_bytes=0",
-        "-c",
-        "features.apps=false",
-        "-c",
-        "features.multi_agent=false",
-        "-c",
-        'web_search="disabled"',
-        "-c",
-        "developer_instructions=" + json.dumps(request["policy"]),
-        prompt,
-    ]
+    args = codex_args(workspace, environment, request["policy"], prompt)
     process = subprocess.Popen(
         args,
         cwd=workspace / "head",
-        env=environment,
+        env={**environment, "REVIEW_MODEL_CAPABILITY": request["token"]},
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         start_new_session=True,

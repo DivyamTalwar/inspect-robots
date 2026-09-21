@@ -6,6 +6,25 @@ const head = 'a'.repeat(40), base = 'b'.repeat(40);
 const job = (id: string, pr: number): Job => ({ id, pr, head, base, scope: '', status: 'queued', result: null, notified: 0, created: 0 });
 
 describe('durable global review queue', () => {
+  it('persists the safety pause across eviction and blocks admission, execution and charges', async () => {
+    const ledger = env.LEDGER.getByName(crypto.randomUUID());
+    await ledger.register(job('paused', 1));
+    await ledger.claimReviewSlot('paused');
+    await ledger.pauseReviewQueue(true);
+    await evictDurableObject(ledger);
+    expect((await ledger.queueState()).paused).toBe(true);
+    expect(await ledger.claimReviewSlot('paused')).toBe('waiting');
+    expect(await ledger.reserve('paused-charge', `1-${head}`, 1, 100)).toBe(false);
+    const error = await runInDurableObject(ledger, async instance => {
+      try { await instance.prepareExecution('paused', base); return ''; }
+      catch (e) { return (e as Error).message; }
+    });
+    expect(error).toBe('review_service_paused');
+    expect((await ledger.costs('paused')).sandboxMicros).toBe(0);
+    await ledger.pauseReviewQueue(false);
+    expect(await ledger.claimReviewSlot('paused')).toBe('acquired');
+    await ledger.prepareExecution('paused', base);
+  });
   it('admits only the oldest request under concurrent claims, without spending for waiters', async () => {
     const ledger = env.LEDGER.getByName(crypto.randomUUID());
     for (let i = 1; i <= 24; i++) await ledger.register(job(`run-${i}`, i));

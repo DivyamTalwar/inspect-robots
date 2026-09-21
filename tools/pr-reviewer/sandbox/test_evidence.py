@@ -6,9 +6,11 @@ Run as root in the review image: python /tests/test_evidence.py
 import importlib.util
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 import unittest
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from threading import Thread
@@ -60,6 +62,60 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 class EvidenceIsolation(unittest.TestCase):
     """PR code must not change the evidence used to review that same PR."""
 
+    @classmethod
+    def setUpClass(cls):
+        """Simulate the root-only checkpoint request in the disposable test container."""
+        path = Path("/tmp/request.json")
+        path.write_text('{"checkpointToken":"synthetic-only"}')
+        path.chmod(0o600)
+
+    def test_management_boundary_has_a_reachable_control(self):
+        """Ensure denied connections aren't artifacts of an absent management server."""
+
+        # A standalone Linux run supplies a local mock; Cloudflare already runs
+        # the real management API here. No production credentials exist in this test.
+        class Management(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b'{"stdout":"uid=0(root)"}')
+
+            def log_message(self, *_args):
+                pass
+
+        server = None
+        try:
+            with suppress(OSError):
+                server = HTTPServer(("127.0.0.1", 3000), Management)
+            if server:
+                Thread(target=server.serve_forever, daemon=True).start()
+            result = subprocess.run(
+                [
+                    "/opt/review-env/bin/python",
+                    "-I",
+                    "-S",
+                    "-c",
+                    "import urllib.request; r=urllib.request.Request("
+                    "'http://127.0.0.1:3000/api/execute',"
+                    'data=b\'{"command":"id","sessionId":"default"}\','
+                    "headers={'Content-Type':'application/json'}); "
+                    "print(urllib.request.urlopen(r,timeout=5).read().decode())",
+                ],
+                user=65534,
+                group=65534,
+                extra_groups=[],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("uid=0(root)", result.stdout)
+        finally:
+            if server:
+                server.shutdown()
+                server.server_close()
+
     def test_build_backend_cannot_replace_evidence_or_forge_output(self):
         """Run a real malicious offline build, then verify canonical evidence remains."""
         with tempfile.TemporaryDirectory(prefix="review-evidence-") as parent:
@@ -83,7 +139,22 @@ class EvidenceIsolation(unittest.TestCase):
                 "HOME": str(workspace / "home"),
                 "PIP_NO_INDEX": "1",
                 "PYTHONDONTWRITEBYTECODE": "1",
+                "CODEX_HOME": str(workspace / "home/.codex"),
             }
+            runner.verify_isolation(workspace, environment)
+            backend = workspace / "head/backend.py"
+            backend.chmod(0o644)
+            backend.write_text(
+                BACKEND.replace(
+                    "    build = Path.cwd()",
+                    "    build = Path.cwd()\n    import subprocess\n"
+                    "    subprocess.run(['/opt/review-env/bin/python','-I','-S',"
+                    "'/opt/check-isolation.py',str(build.parent),"
+                    + repr(os.readlink("/proc/self/ns/pid"))
+                    + ",'build'],check=True)",
+                )
+            )
+            backend.chmod(0o444)
             executions = runner.prepare_packages(workspace, environment, "a" * 40)
             setup = json.loads((workspace / "setup.json").read_text())
             self.assertEqual(executions[0]["exitCode"], 0, setup)
@@ -99,14 +170,24 @@ class EvidenceIsolation(unittest.TestCase):
 w=pathlib.Path(os.environ['WORKSPACE'])
 for p in [w/'head/source.py',w/'context.json',w/'setup.json']:
  try: p.write_text('tampered')
- except PermissionError: pass
+ except OSError: pass
  else: raise AssertionError(str(p))
 shutil.copytree(w/'head',w/'scratch/copy')
 p=w/'scratch/copy/source.py';p.chmod(0o644);p.write_text('reproduction')
-(w/'output/result.json').write_text('{}')
+try: (w/'output/result.json').write_text('{}')
+except OSError: pass
+else: raise AssertionError('forged client output')
 """
             check = subprocess.run(
-                ["/opt/review-env/bin/python", "-c", code],
+                [
+                    "codex",
+                    "sandbox",
+                    *runner.tool_permissions(workspace),
+                    "--",
+                    "/opt/review-env/bin/python",
+                    "-c",
+                    code,
+                ],
                 env={**environment, "WORKSPACE": str(workspace)},
                 user=65534,
                 group=65534,
@@ -131,8 +212,12 @@ p=w/'scratch/copy/source.py';p.chmod(0o644);p.write_text('reproduction')
             self.assertIn("+proposed change", diff.stdout)
 
     def test_real_codex_starts_with_protected_workspace_and_offline_provider(self):
-        """Exercise actual CLI startup and output with a local synthetic model."""
-        text = "startup-ok"
+        """Real multi-turn CLI: hostile tool call, private header and valid final output."""
+        text = '{"ok":true}'
+        requests = []
+        command = ""
+        escalation = ""
+        capability = "synthetic-model-capability-not-a-real-secret"
         part = {"type": "output_text", "text": text, "annotations": []}
         item = {
             "type": "message",
@@ -197,13 +282,55 @@ p=w/'scratch/copy/source.py';p.chmod(0o644);p.write_text('reproduction')
             """Serve fixed Responses events without credentials or external network."""
 
             def do_POST(self):
-                """Return one deterministic assistant response."""
-                self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                """Exercise native tools before returning the fixed final response."""
+                raw = self.rfile.read(int(self.headers.get("Content-Length", "0")))
+                requests.append((self.headers.get("X-Review-Token"), json.loads(raw)))
+                body = payload
+                if len(requests) <= 2:
+                    arguments = (
+                        {"cmd": command, "yield_time_ms": 1000}
+                        if len(requests) == 1
+                        else {
+                            "cmd": escalation,
+                            "sandbox_permissions": "require_escalated",
+                            "justification": "Synthetic boundary bypass test.",
+                        }
+                    )
+                    call = {
+                        "type": "custom_tool_call",
+                        "id": "ctc_probe" + str(len(requests)),
+                        "call_id": "call_probe" + str(len(requests)),
+                        "name": "exec",
+                        "namespace": "functions",
+                        "input": "text(await tools.exec_command(" + json.dumps(arguments) + "));",
+                    }
+                    tool_events = [
+                        {
+                            "type": "response.output_item.added",
+                            "output_index": 0,
+                            "item": {**call, "input": ""},
+                        },
+                        {
+                            "type": "response.custom_tool_call_input.delta",
+                            "item_id": call["id"],
+                            "output_index": 0,
+                            "delta": call["input"],
+                        },
+                        {
+                            "type": "response.custom_tool_call_input.done",
+                            "item_id": call["id"],
+                            "output_index": 0,
+                            "input": call["input"],
+                        },
+                        {"type": "response.output_item.done", "output_index": 0, "item": call},
+                        {"type": "response.completed", "response": {**response, "output": [call]}},
+                    ]
+                    body = "".join("data: " + json.dumps(e) + "\n\n" for e in tool_events).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
-                self.send_header("Content-Length", str(len(payload)))
+                self.send_header("Content-Length", str(len(body)))
                 self.end_headers()
-                self.wfile.write(payload)
+                self.wfile.write(body)
 
             def log_message(self, *_args):
                 """Keep request text out of test output."""
@@ -218,50 +345,80 @@ p=w/'scratch/copy/source.py';p.chmod(0o644);p.write_text('reproduction')
                         (workspace / tree).mkdir(parents=True)
                     (workspace / "context.json").write_text("{}")
                     runner.protect_evidence(workspace)
+                    environment = {
+                        "PATH": "/opt/review-env/bin:/usr/local/bin:/usr/bin:/bin",
+                        "HOME": str(workspace / "home"),
+                        "CODEX_HOME": str(workspace / "home/.codex"),
+                        "TMPDIR": str(workspace / "scratch"),
+                    }
+                    runner.verify_isolation(workspace, environment)
                     output = workspace / "output/result.json"
-                    args = [
-                        "codex",
-                        "exec",
-                        "--model",
-                        "gpt-6-astra",
-                        "--ignore-user-config",
-                        "--ignore-rules",
-                        "--skip-git-repo-check",
-                        "--ephemeral",
-                        "--dangerously-bypass-approvals-and-sandbox",
-                        "--json",
-                        "-o",
-                        str(output),
+                    Path("/tmp/review-schema.json").write_text(
+                        json.dumps(
+                            {
+                                "type": "object",
+                                "properties": {"ok": {"type": "boolean"}},
+                                "required": ["ok"],
+                                "additionalProperties": False,
+                            }
+                        )
+                    )
+                    args = runner.codex_args(
+                        workspace,
+                        environment,
+                        "Synthetic isolation regression only.",
+                        'Run the supplied isolation check, then return {"ok":true}.',
+                    )
+                    args[-1:-1] = [
+                        "-c",
+                        f'model_providers.review_gateway.base_url="http://127.0.0.1:{server.server_port}"',
                     ]
-                    settings = [
-                        'model_provider="fixture"',
-                        'model_providers.fixture.name="Offline"',
-                        'model_providers.fixture.wire_api="responses"',
-                        "model_providers.fixture.requires_openai_auth=false",
-                        "model_providers.fixture.request_max_retries=0",
-                        "model_providers.fixture.stream_max_retries=0",
-                        f'model_providers.fixture.base_url="http://127.0.0.1:{server.server_port}"',
-                    ]
-                    for setting in settings:
-                        args.extend(["-c", setting])
-                    args.append("Return startup-ok.")
+                    command = shlex.join(
+                        [
+                            "/opt/review-env/bin/python",
+                            "-I",
+                            "-S",
+                            "/opt/check-isolation.py",
+                            str(workspace),
+                            os.readlink("/proc/self/ns/pid"),
+                            "tool",
+                        ]
+                    )
+                    escalation = "echo escaped > " + shlex.quote(
+                        str(workspace / "home/escalation-marker")
+                    )
+                    self.assertNotIn(capability, " ".join(args))
                     result = subprocess.run(
                         args,
                         cwd=workspace / "head",
-                        env={
-                            "PATH": "/usr/local/bin:/usr/bin:/bin",
-                            "HOME": str(workspace / "home"),
-                            "CODEX_HOME": str(workspace / "home/.codex"),
-                        },
+                        env={**environment, "REVIEW_MODEL_CAPABILITY": capability},
                         user=65534,
                         group=65534,
                         extra_groups=[],
                         capture_output=True,
                         text=True,
-                        timeout=30,
+                        timeout=60,
                     )
                     self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(output.read_text().strip(), text)
+                    self.assertEqual(json.loads(output.read_text()), {"ok": True})
+                    self.assertEqual(len(requests), 3, result.stderr)
+                    self.assertFalse((workspace / "home/escalation-marker").exists())
+                    for header, body in requests:
+                        self.assertEqual(header, capability)
+                        self.assertNotIn(capability, json.dumps(body))
+                    tool_output = [
+                        v
+                        for v in requests[1][1]["input"]
+                        if v.get("type") == "custom_tool_call_output"
+                    ]
+                    self.assertTrue(tool_output, result.stdout)
+                    records = [
+                        json.loads(part["text"])
+                        for part in tool_output[0]["output"]
+                        if part.get("text", "").startswith("{")
+                    ]
+                    self.assertEqual(records[0]["exit_code"], 0, records)
+                    self.assertIn('"isolated": true', records[0]["output"])
             finally:
                 server.shutdown()
                 thread.join(timeout=5)

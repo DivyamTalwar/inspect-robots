@@ -40,8 +40,17 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
   async pending(): Promise<Job[]> {
     return this.ctx.storage.sql.exec<Job>("SELECT * FROM jobs WHERE status IN ('queued','running','approved','recovering','publishing','holding') ORDER BY created LIMIT 100").toArray();
   }
-  async queueState(): Promise<{ owner: string | null; waiting: { id: string; pr: number }[] }> {
-    return { owner: this.slotOwner(), waiting: this.ctx.storage.sql.exec<{ id: string; pr: number }>("SELECT id,pr FROM jobs WHERE status='queued' ORDER BY created,rowid").toArray() };
+  async queueState(): Promise<{ owner: string | null; paused: boolean; waiting: { id: string; pr: number }[] }> {
+    return { owner: this.slotOwner(), paused: await this.reviewQueuePaused(), waiting: this.ctx.storage.sql.exec<{ id: string; pr: number }>("SELECT id,pr FROM jobs WHERE status='queued' ORDER BY created,rowid").toArray() };
+  }
+  async pauseReviewQueue(paused: boolean): Promise<void> {
+    this.ctx.storage.sql.exec("INSERT OR REPLACE INTO settings VALUES('queue-paused',?)", String(paused));
+  }
+  async reviewQueuePaused(): Promise<boolean> {
+    return this.queuePausedNow();
+  }
+  private queuePausedNow(): boolean {
+    return this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM settings WHERE key='queue-paused'").toArray()[0]?.value === 'true';
   }
   private slotOwner(): string | null {
     return this.ctx.storage.sql.exec<{ value: string }>("SELECT value FROM settings WHERE key='review-slot'").toArray()[0]?.value ?? null;
@@ -49,6 +58,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
   async claimReviewSlot(id: string): Promise<'acquired' | 'waiting' | 'obsolete'> {
     // The whole admission decision is synchronous and atomic, including FIFO order.
     return this.ctx.storage.transactionSync(() => {
+      if (this.queuePausedNow()) return 'waiting';
       const job = this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0];
       if (!job) throw new Error('unknown_job');
       if (!['queued', 'running', 'recovering', 'publishing'].includes(job.status)) return 'obsolete';
@@ -126,6 +136,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('invalid_amount');
     // All SQL is synchronous; the transaction cannot interleave with another reservation.
     return this.ctx.storage.transactionSync(() => {
+      if (this.queuePausedNow()) return false;
       if (this.ctx.storage.sql.exec("SELECT value FROM settings WHERE key='billing_hold'").toArray().length) return false;
       if (this.ctx.storage.sql.exec('SELECT id FROM charges WHERE id=?', id).toArray().length) return false;
       const month = new Date().toISOString().slice(0, 7);
@@ -139,6 +150,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     return this.ctx.storage.sql.exec<Execution>('SELECT token,checkpointToken,sandbox,started,mergeBase FROM executions WHERE job=?', id).toArray()[0] ?? null;
   }
   async prepareExecution(id: string, mergeBase: string): Promise<Execution> {
+    if (this.queuePausedNow()) throw new Error('review_service_paused');
     const existing = await this.execution(id);
     if (existing) return existing;
     if (this.slotOwner() !== id) throw new Error('review_slot_required');
@@ -147,6 +159,7 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     if (await this.remaining(`${job.pr}-${job.head}`, job.pr) < 2_000_000) throw new Error('insufficient_run_budget');
     // Recheck after awaits; commit the charge, session and durable handle together.
     return this.ctx.storage.transactionSync(() => {
+      if (this.queuePausedNow()) throw new Error('review_service_paused');
       const prior = this.ctx.storage.sql.exec<Execution>('SELECT token,checkpointToken,sandbox,started,mergeBase FROM executions WHERE job=?', id).toArray()[0];
       if (prior) return prior;
       if (this.slotOwner() !== id) throw new Error('review_slot_required');

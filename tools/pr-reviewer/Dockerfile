@@ -6,4 +6,5 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/python
 RUN uv python install 3.11 && uv venv --python 3.11 /opt/review-env && uv pip install --python /opt/review-env/bin/python numpy==2.2.6 pytest==8.4.2 pytest-cov==6.3.0 hypothesis==6.140.0 pip==25.2 hatchling==1.27.0 hatch-vcs==0.5.0 hatch-fancy-pypi-readme==25.1.0
 ENV PATH="/opt/review-env/bin:$PATH"
 COPY sandbox/codex_runner.py /opt/codex-review.py
+COPY sandbox/check_isolation.py /opt/check-isolation.py
 EXPOSE 8080

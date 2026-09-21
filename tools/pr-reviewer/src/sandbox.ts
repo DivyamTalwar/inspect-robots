@@ -36,13 +36,18 @@ export class ReviewSandbox extends Sandbox<RunnerEnv> {
 }
 ReviewSandbox.outboundByHost = {
   'review-model.local': async (request, env) => {
-    const match = /^\/([a-f0-9]{64})\/(responses|checkpoint)$/.exec(new URL(request.url).pathname);
-    if (request.method !== 'POST' || !match) return new Response('Not allowed', { status: 403 });
-    if (match[2] === 'checkpoint') {
-      await env.MODEL.deliverCheckpoint(match[1], await boundedText(request, 1_500_000));
-      return new Response('Saved');
+    // The client capability is carried in a private environment-backed header,
+    // never in command arguments inherited/readable by repository processes.
+    const url = new URL(request.url);
+    if (request.method === 'POST' && url.pathname === '/responses') {
+      const token = request.headers.get('X-Review-Token') ?? '';
+      if (!/^[a-f0-9]{64}$/.test(token)) return new Response('Not allowed', { status: 403 });
+      return env.MODEL.respond(token, await boundedText(request, 3_000_000));
     }
-    return env.MODEL.respond(match[1], await boundedText(request, 3_000_000));
+    const match = /^\/([a-f0-9]{64})\/(checkpoint)$/.exec(url.pathname);
+    if (request.method !== 'POST' || !match) return new Response('Not allowed', { status: 403 });
+    await env.MODEL.deliverCheckpoint(match[1], await boundedText(request, 1_500_000));
+    return new Response('Saved');
   }
 };
 

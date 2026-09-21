@@ -13,6 +13,13 @@ async function setup() {
   return { ledger, token, gateway };
 }
 describe('Codex private budget gateway', () => {
+  it('refuses model calls while the persistent safety pause is active', async () => {
+    const s = await setup(); const send = vi.fn(); vi.stubGlobal('fetch', send);
+    await s.ledger.pauseReviewQueue(true);
+    expect((await s.gateway.respond(s.token, request)).status).toBe(503);
+    expect(send).not.toHaveBeenCalled();
+    expect((await s.ledger.costs(job.id)).modelCalls).toBe(0);
+  });
   it('pins Astra/high, settles streamed usage and refuses duplicate submissions', async () => {
     const s = await setup(); let creates = 0;
     vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {

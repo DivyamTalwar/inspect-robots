@@ -23,6 +23,7 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
   }
   async respond(token: string, body: string): Promise<Response> {
     const ledger = this.env.LEDGER.getByName('budget');
+    if (await ledger.reviewQueuePaused()) return new Response('Review service paused', { status: 503 });
     const job = await ledger.session(token);
     if (!job || await ledger.runOutput(job.id) !== null) return new Response('Review session unavailable', { status: 403 });
     const stop = async (reason: string, message: string, status: number) => {

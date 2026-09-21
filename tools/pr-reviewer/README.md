@@ -68,7 +68,8 @@ merges. The sandbox receives neither the App key nor a GitHub installation token
 
 A private model gateway outside the sandbox holds the OpenAI key and enforces
 spending before each inference request. Codex receives only a short-lived capability
-for its own review budget. Outbound networking is denied except for the internal
+for its own review budget, supplied through a client-only environment-backed HTTP
+header. Capabilities are never placed in process arguments. Outbound networking is denied except for the internal
 Responses proxy; arbitrary hosts, provider endpoints and paid provider tools are
 not allowed. Exact duplicate submissions cannot double-charge an ambiguous request.
 Streamed usage settles reservations, while missing usage retains them. The CLI's
@@ -85,7 +86,22 @@ copy; they cannot alter canonical evidence, the reviewer's home or its result
 directory. Setup records are written by the trusted launcher. Codex receives a
 writable scratch directory for reproductions and modified test copies.
 
-The sandbox runs Codex and its commands as an unprivileged user. Scratch files
+The Cloudflare container's management API is **not** a Unix-user isolation
+boundary: an ordinary process in its network namespace can reach the root API
+on localhost. `enableInternet=false` does not prevent this. Repository commands
+therefore run through Codex's pinned native Linux sandbox with a separate PID
+namespace, a read-only root, explicit denial of the client's home/output and
+request/checkpoint files, and network syscalls restricted by the native sandbox.
+Only scratch is writable. Although the client and its sandboxed shell have UID
+65534, the shell cannot access the client's files, environment, processes or
+network endpoint. Shell environments are explicitly allowlisted without the model
+capability, and requests to run outside the sandbox are rejected (`never`).
+
+Package builds use UID 65533 with separate network, PID, mount, IPC and UTS
+namespaces, no supplementary groups/capabilities, and `no_new_privs`. Every run
+checks both boundaries before executing builds or making paid model calls; an
+unsupported control stops the run, with no unsandboxed fallback. The client itself
+retains access to the private model gateway. Scratch files
 persist within that fresh session and are destroyed afterward. Python 3.11,
 NumPy, pytest, hypothesis, pip, Hatch and rg are preinstalled. Offline local package
 builds run automatically for core and changed Python packages, using a disposable
@@ -243,7 +259,20 @@ Python build backend attempts source/context replacement, parent-directory
 renames, permission changes and result forgery; all must fail while package
 installation and writable scratch reproductions still work.
 It also starts the real Codex CLI against a local synthetic Responses server,
-verifying its home-directory permissions and result output without an OpenAI key.
+exercises real tool execution, attempts sandbox escalation, and verifies the
+client-only header, filtered tool environment and final result. Both build and
+tool paths attempt the localhost management exploit over IPv4/IPv6, client file
+tampering and process/environment access. Positive checks require package
+installation and scratch writes to succeed. Native Linux is required; AMD64
+emulation on an ARM Mac cannot validate seccomp. `isolation-probe.wrangler.jsonc`
+runs these exact sources in a credential-free Cloudflare container; it has no
+OpenAI key, GitHub publisher or production ledger and never posts a PR review.
+
+A management-only workflow payload `{"id":"safety-pause","pauseReviews":true}`
+persistently pauses queue admission and model reservations, revokes the active
+review session and destroys its sandbox. Waiting jobs are retained. Resume only
+after deployed boundary verification with `pauseReviews:false`; do not reuse
+an execution terminated by the safety pause.
 
 Hosting estimate (before adding sandbox execution): a few hundred reviews per month should fit the included
 Workers, Workflows and SQLite allowances, so the expected incremental hosting
