@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 54 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
+- TypeScript and 56 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
-- Publisher version: `33c91289-7c0e-42ee-8aa9-3319b40d0fe5`.
-- Reviewer version: `55ff476f-6cdb-4305-8bb7-9ee0b419efe6`.
+- Publisher version: `0bab7490-98b0-4d3b-b54c-58c7547f8dc9`.
+- Reviewer version: `e0b9473d-325a-4ee6-9690-73f331a53e3f`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -146,3 +146,4 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - REQUEST_CHANGES tags the actual PR opener from GitHub metadata. All other verdicts tag @jeqcho. Approvals awaiting CI mention Jay without requesting a merge until CI passes. Unmentionable, missing or deleted author accounts fall back to Jay to coordinate fixes.
 - PR456 was opened by jeqcho, so its edit requests consistently tag @jeqcho. No original-contributor exception is configured.
 - TypeScript and all 56 Workers/SQLite tests pass, including status prefixes, trusted author selection, mention-injection rejection, CI gating and legacy saved-result compatibility.
+- Deployed publisher `0bab7490-98b0-4d3b-b54c-58c7547f8dc9` and reviewer `e0b9473d-325a-4ee6-9690-73f331a53e3f`. The maintainer explicitly requested a fresh end-to-end review rather than a saved-result refresh; one new `/review` command was submitted for PR456 with $8.780028 available. No spending limits were changed.
