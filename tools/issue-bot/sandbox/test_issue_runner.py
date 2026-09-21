@@ -258,7 +258,7 @@ for attempt in attempts:
 """
         for uid in (runner.AGENT_UID, runner.BUILD_UID, runner.TOOL_UID):
             completed = subprocess.run(
-                ["/opt/issue-env/bin/python", "-c", script, str(workspace), str(secret)],
+                [sys.executable, "-c", script, str(workspace), str(secret)],
                 user=uid,
                 group=uid,
                 extra_groups=[],
@@ -269,7 +269,7 @@ for attempt in attempts:
         self.assertEqual((workspace / "base" / "src" / "a.py").read_text(), "pass")
         # Native tool identity can implement; build user cannot mutate its work.
         command = [
-            "/opt/issue-env/bin/python",
+            sys.executable,
             "-c",
             "import pathlib,sys; pathlib.Path(sys.argv[1]).write_text('fixed')",
             str(workspace / "work" / "src" / "a.py"),
