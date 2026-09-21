@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 39 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
+- TypeScript and 51 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
 - Publisher version: `37cd6349-4e41-4423-9e30-1c9c438af6a9`.
-- Reviewer version: `5df86445-18bc-490f-a6c1-e21902a51080`.
+- Reviewer version: `41f24283-c5ad-4125-b011-39fa9ca42c44`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -65,7 +65,7 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Diagnostic run `230721d16d351acd424c9633cb672b40619b430a06f4d553` confirmed $0.244662 remaining in the conservative head ledger. This is not an invoice total: earlier settlement charged every input token at the non-cached ceiling.
 - Corrected future settlement to credit confirmed cache reads at $1/M, added final-turn budget steering, and preserved budget-stop reasons independently of CLI stderr. Existing charges remain unchanged because historical cache usage was not retained.
 - No further paid trial was started after these fixes. A complete end-to-end verdict on PR #456 remains pending additional authorized trial allowance. The $5/head, $15/PR and $200/month limits remain unchanged.
-- Runner version: `a7f49577-cfd0-45a4-9714-54b2fa981059`.
+- Runner version: `d9eae883-166d-48d6-98a5-68ceb1f78d01`.
 
 ## Authorized trial budget exception
 
@@ -122,3 +122,7 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Workflow interruptions resume the same execution, including below the fresh-run admission floor. Cleanup errors cannot discard a saved review. Publication failures retain the validated verdict for the ten-minute reconciler.
 - TypeScript and 51 real Workers/SQLite tests passed, including concurrent preparation, eviction, lost acknowledgements, exhausted-budget recovery, capability separation, automatic resumption and delayed publication.
 - The original PR456 result predates this persistence path and remains unrecoverable. No new paid PR review was started, charges were not reset, and all spending limits remain unchanged.
+- Live isolated Cloudflare workflows `recovery-final-first` and `recovery-final-replay` completed using the real Codex CLI and synthetic model responses. Both reported exactly one launch, two model turns and one injected completion-acknowledgement failure. Repeated injected cleanup failures did not discard the result. Replay skipped launch/poll entirely. Both offline package installations and the unprivileged credential-isolation command exited successfully.
+- Earlier isolated probe `recovery-resume` recovered a separately saved result after its original workflow failed. A later probe encountered mixed deployment versions; it was discarded, and the final probe above used a fresh record after rollout settled. Production intake was paused during the two-service update.
+- Read-only production diagnostic `durability-budget-audit` completed after the ledger upgrade: $13.057480 cumulative PR456-head usage, $1.942520 remaining, zero unresolved reservations. This test submitted no model request and published no GitHub comment.
+- Deployed reviewer `41f24283-c5ad-4125-b011-39fa9ca42c44` and runner `d9eae883-166d-48d6-98a5-68ceb1f78d01`; publisher unchanged. Health confirms advisory mode, policy 3 and enabled intake. The temporary probe Workflow, container application and Worker were deleted after verification. No new OpenAI charges were incurred by recovery testing.
