@@ -83,3 +83,49 @@ describe('Codex private budget gateway', () => {
     expect(await s.ledger.sessionFailure(s.token)).toBe('budget_exhausted');
   });
 });
+
+it('reconnects during streamed settlement and retries a lost commit acknowledgement without repeating inference', async () => {
+  const s = await setup();
+  let generation = 0, settlements = 0, creates = 0;
+  const getByName = () => {
+    const connected = generation;
+    return new Proxy(s.ledger, { get(target, key) {
+      return async (...args: any[]) => {
+        if (connected !== generation) throw new Error('Connection closed: this Durable Object instance is no longer active. Reconnect or retry the request.');
+        const result = await (target as any)[key](...args);
+        if (key === 'settle' && ++settlements === 1) {
+          generation++;
+          throw Object.assign(new Error('Lost acknowledgement after commit'), { retryable: true });
+        }
+        return result;
+      };
+    } });
+  };
+  const gateway = new ModelGateway(createExecutionContext(), { LEDGER: { getByName }, OPENAI_API_KEY: 'sk-test-only' });
+  vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {
+    if (new Request(url, init).url.endsWith('/input_tokens')) return Response.json({ input_tokens: 100 });
+    creates++; generation++;
+    return new Response('data: {"type":"response.completed","response":{"usage":{"input_tokens":100,"output_tokens":10}}}\n\n');
+  }));
+  expect(await (await gateway.respond(s.token, request)).text()).toContain('response.completed');
+  expect(settlements).toBe(2);
+  expect(creates).toBe(1);
+  expect(await s.ledger.remaining(`99-${job.head}`, 99)).toBe(5_000_000 - 1800);
+  expect((await s.ledger.costs(job.id)).modelCalls).toBe(1);
+});
+
+it('does not replay an ambiguous reservation or submit paid inference after its acknowledgement is lost', async () => {
+  const s = await setup(); let reservations = 0;
+  const gateway = new ModelGateway(createExecutionContext(), { LEDGER: { getByName: () => new Proxy(s.ledger, { get(target, key) {
+    return async (...args: any[]) => {
+      const result = await (target as any)[key](...args);
+      if (key === 'reserve') { reservations++; throw Object.assign(new Error('Lost reservation acknowledgement'), { retryable: true }); }
+      return result;
+    };
+  } }) }, OPENAI_API_KEY: 'sk-test-only' });
+  const send = vi.fn(async () => Response.json({ input_tokens: 100 })); vi.stubGlobal('fetch', send);
+  await expect(gateway.respond(s.token, request)).rejects.toThrow('Lost reservation acknowledgement');
+  expect(reservations).toBe(1);
+  expect(send).toHaveBeenCalledTimes(1); // Token counting only, no paid response.
+  expect(await s.ledger.remaining(`99-${job.head}`, 99)).toBeLessThan(5_000_000);
+});

@@ -311,3 +311,67 @@ it('allows an operator to inspect saved output without inference or publication'
   expect((await s.ledger.job(job.id))?.status).toBe('queued');
   expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_900_000);
 });
+
+const disconnected = () => new Error('Connection closed: this Durable Object instance is no longer active. Reconnect or retry the request.');
+describe('Durable Object connection recovery', () => {
+  it('reconnects after queue sleep instead of keeping a permanently broken stub', async () => {
+    const s = setup();
+    await s.ledger.register({ ...job, id: 'first' });
+    await s.ledger.claimReviewSlot('first');
+    await s.ledger.register(job);
+    let generation = 0;
+    const getByName = () => {
+      const connected = generation;
+      return new Proxy(s.ledger, { get(target, key) {
+        return async (...args: any[]) => {
+          if (connected !== generation) throw disconnected();
+          return (target as any)[key](...args);
+        };
+      } });
+    };
+    s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { await s.ledger.checkpoint(args[5], completeOutput); });
+    const publish = vi.fn(async () => true);
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: { ...s.config, LEDGER: { getByName }, PUBLISHER: { ...s.config.PUBLISHER, publish } } });
+    const sleep = vi.fn(async () => { generation++; await s.ledger.finish('first', 'done'); await s.ledger.releaseReviewSlot('first'); });
+    await workflow.run({ instanceId: job.id, payload: { id: job.id } } as any, { ...s.step, sleep } as unknown as WorkflowStep);
+    expect(sleep).toHaveBeenCalledTimes(1);
+    expect(s.config.RUNNER.start).toHaveBeenCalledTimes(1);
+    expect((await s.ledger.job(job.id))?.status).toBe('approved');
+    expect((await s.ledger.costs(job.id)).sandboxMicros).toBe(100_000);
+  });
+  it('leaves a transient admission failure queued for reconciliation without charges or a terminal notice', async () => {
+    const s = setup(); await s.ledger.register(job);
+    const getByName = () => new Proxy(s.ledger, { get(target, key) {
+      if (key === 'claimReviewSlot') return async () => { throw disconnected(); };
+      return (...args: any[]) => (target as any)[key](...args);
+    } });
+    const publish = vi.fn(async () => true);
+    const config = { ...s.config, LEDGER: { getByName }, REVIEW: { ...s.config.REVIEW, get: async () => ({ status: async () => ({ status: 'complete' }) }) }, PUBLISHER: { ...s.config.PUBLISHER, publish } };
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: config });
+    await workflow.run({ instanceId: job.id, payload: { id: job.id } } as any, s.step as WorkflowStep);
+    expect((await s.ledger.job(job.id))?.status).toBe('queued');
+    expect(publish.mock.calls.map((c: any[]) => c[2])).toEqual(['queued']);
+    expect((await s.ledger.costs(job.id)).sandboxMicros).toBe(0);
+    await worker.scheduled({} as ScheduledController, config as any);
+    expect(s.create).toHaveBeenCalledWith(expect.objectContaining({ params: { id: job.id } }));
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+  });
+  it('does not replace a published verdict when a later budget warning fails', async () => {
+    const s = setup(); await s.ledger.register(job);
+    s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { await s.ledger.checkpoint(args[5], completeOutput); });
+    const getByName = () => new Proxy(s.ledger, { get(target, key) {
+      if (key === 'warningNeeded') return async () => true;
+      return (...args: any[]) => (target as any)[key](...args);
+    } });
+    const publish = vi.fn(async (_job: unknown, _result: unknown, notice?: string) => { if (notice === 'budget-warning') throw disconnected(); return true; });
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: { ...s.config, LEDGER: { getByName }, PUBLISHER: { ...s.config.PUBLISHER, publish } } });
+    await workflow.run({ instanceId: job.id, payload: { id: job.id } } as any, s.step as WorkflowStep);
+    const saved = await s.ledger.job(job.id);
+    expect(saved?.status).toBe('approved');
+    expect(JSON.parse(saved!.result!).verdict).toBe('APPROVE');
+    expect(publish.mock.calls.some(c => c[2] === 'held')).toBe(false);
+  });
+});

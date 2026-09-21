@@ -1,6 +1,7 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
 import OpenAI from 'openai';
 import { digest, MODEL } from './common';
+import { retryLedger } from './ledger-connection';
 
 function localTools(tools: any[]): boolean {
   return tools.every(tool => ['function', 'custom', 'local_shell', 'apply_patch'].includes(tool.type) || (tool.type === 'namespace' && Array.isArray(tool.tools) && localTools(tool.tools)));
@@ -10,27 +11,28 @@ function localTools(tools: any[]): boolean {
 export type GatewayEnvironment = Pick<ReviewerEnv, 'OPENAI_API_KEY'> & { LEDGER: Pick<ReviewerEnv['LEDGER'], 'getByName'> };
 export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
   async deliverCheckpoint(receipt: string, body: string): Promise<void> {
-    await this.env.LEDGER.getByName('budget').deliverCheckpoint(receipt, body);
+    await retryLedger(this.env, ledger => ledger.deliverCheckpoint(receipt, body));
   }
   async checkpoint(token: string, body: string): Promise<void> {
-    await this.env.LEDGER.getByName('budget').checkpoint(token, body);
+    await retryLedger(this.env, ledger => ledger.checkpoint(token, body));
   }
   async completed(token: string): Promise<boolean> {
-    const ledger = this.env.LEDGER.getByName('budget');
-    const job = await ledger.session(token);
+    // Fetch a fresh stub for each RPC, including retries after Workflow sleeps.
+    const ledger = () => this.env.LEDGER.getByName('budget');
+    const job = await ledger().session(token);
     if (!job) throw new Error('invalid_review_session');
-    return await ledger.runOutput(job.id) !== null;
+    return await ledger().runOutput(job.id) !== null;
   }
   async respond(token: string, body: string): Promise<Response> {
-    const ledger = this.env.LEDGER.getByName('budget');
-    if (await ledger.reviewQueuePaused()) return new Response('Review service paused', { status: 503 });
-    const job = await ledger.session(token);
-    if (!job || await ledger.runOutput(job.id) !== null) return new Response('Review session unavailable', { status: 403 });
+    const ledger = () => this.env.LEDGER.getByName('budget');
+    if (await ledger().reviewQueuePaused()) return new Response('Review service paused', { status: 503 });
+    const job = await ledger().session(token);
+    if (!job || await ledger().runOutput(job.id) !== null) return new Response('Review session unavailable', { status: 403 });
     const stop = async (reason: string, message: string, status: number) => {
-      await ledger.sessionFailure(token, reason);
+      await ledger().sessionFailure(token, reason);
       return new Response(message, { status });
     };
-    if (await ledger.billingHold()) {
+    if (await ledger().billingHold()) {
       console.error(JSON.stringify({ event: 'model_stopped', job: job.id, reason: 'billing_hold' }));
       return stop('billing_hold', 'Review billing hold', 403);
     }
@@ -41,7 +43,7 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
     const client = new OpenAI({ apiKey: this.env.OPENAI_API_KEY, maxRetries: 0, timeout: 60000 });
     const params = { ...request, model: MODEL, reasoning: { ...request.reasoning, effort: 'high' }, service_tier: 'default', stream: true, background: false, store: false };
     delete params.max_output_tokens;
-    const allowance = await ledger.remaining(`${job.pr}-${job.head}`, job.pr);
+    const allowance = await ledger().remaining(`${job.pr}-${job.head}`, job.pr);
     params.input = [...params.input, { role: 'developer', content: `The review has $${(allowance / 1_000_000).toFixed(2)} remaining, including this call. Preserve enough budget to write the final review; report REQUIRE_REVIEWER for material evidence gaps instead of claiming a complete review.` }];
     let count;
     try { count = await client.responses.inputTokens.count({ model: MODEL, instructions: params.instructions, input: params.input, tools: params.tools, text: params.text, reasoning: params.reasoning }); }
@@ -59,7 +61,7 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
       params.input[params.input.length - 1].content = 'Final review turn: budget cannot safely cover more investigation. Return review JSON now. Name exact unchecked files or behavior, the budget limit, and the next check. Use REQUIRE_REVIEWER with COMPLETE_REVIEW for unfinished inspection, empty decision_needed, and specific limitations. ESCALATE only for an actual product decision. Do not invent findings.';
     }
     const charge = `${job.id}-codex-${await digest(token + body)}`;
-    if (!await ledger.reserve(charge, `${job.pr}-${job.head}`, job.pr, inputReservation + maxOutput * 50)) return new Response('Review budget or duplicate request guard', { status: 409 });
+    if (!await ledger().reserve(charge, `${job.pr}-${job.head}`, job.pr, inputReservation + maxOutput * 50)) return new Response('Review budget or duplicate request guard', { status: 409 });
     const response = await fetch(new Request('https://api.openai.com/v1/responses', {
       method: 'POST', redirect: 'manual', headers: { Authorization: `Bearer ${this.env.OPENAI_API_KEY}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...params, max_output_tokens: maxOutput }), signal: AbortSignal.timeout(15 * 60_000),
@@ -68,6 +70,7 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
       console.error(JSON.stringify({ event: 'model_stopped', job: job.id, reason: 'model_request_failed', status: response.status }));
       return new Response('Model request did not complete; reservation retained', { status: 502 });
     }
+    const env = this.env;
     let pending = '';
     const decoder = new TextDecoder();
     const stream = new TransformStream<Uint8Array, Uint8Array>({
@@ -86,7 +89,7 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
             // Keep the cache-write ceiling for other input, but credit confirmed
             // cache reads at the published $1/M rate. Never assume a cache hit.
             const amount = (usage.input_tokens - cached) * 13 + cached + usage.output_tokens * 50;
-            const settled = await ledger.settle(charge, amount);
+            const settled = await retryLedger(env, ledger => ledger.settle(charge, amount));
             console.log(JSON.stringify({ event: 'model_usage', job: job.id, inputTokens: usage.input_tokens, cachedTokens: cached, outputTokens: usage.output_tokens, chargedMicros: amount, settled }));
           }
         }
