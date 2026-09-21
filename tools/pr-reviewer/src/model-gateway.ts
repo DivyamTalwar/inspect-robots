@@ -9,10 +9,22 @@ function localTools(tools: any[]): boolean {
 // Private binding. Codex receives a short-lived budget capability, never an API key.
 export type GatewayEnvironment = Pick<ReviewerEnv, 'OPENAI_API_KEY'> & { LEDGER: Pick<ReviewerEnv['LEDGER'], 'getByName'> };
 export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
+  async deliverCheckpoint(receipt: string, body: string): Promise<void> {
+    await this.env.LEDGER.getByName('budget').deliverCheckpoint(receipt, body);
+  }
+  async checkpoint(token: string, body: string): Promise<void> {
+    await this.env.LEDGER.getByName('budget').checkpoint(token, body);
+  }
+  async completed(token: string): Promise<boolean> {
+    const ledger = this.env.LEDGER.getByName('budget');
+    const job = await ledger.session(token);
+    if (!job) throw new Error('invalid_review_session');
+    return await ledger.runOutput(job.id) !== null;
+  }
   async respond(token: string, body: string): Promise<Response> {
     const ledger = this.env.LEDGER.getByName('budget');
     const job = await ledger.session(token);
-    if (!job) return new Response('Review session unavailable', { status: 403 });
+    if (!job || await ledger.runOutput(job.id) !== null) return new Response('Review session unavailable', { status: 403 });
     const stop = async (reason: string, message: string, status: number) => {
       await ledger.sessionFailure(token, reason);
       return new Response(message, { status });

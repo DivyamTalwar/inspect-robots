@@ -17,6 +17,8 @@ const reasons = {
   incomplete_model_response: ['The model did not return a complete review.', 'Check the run and any incurred usage before requesting another review.'],
   model_timeout: ['The model did not finish within the review time limit.', 'Check provider status and any incurred usage before requesting another review.'],
   review_round_limit: ['The reviewer exhausted its allowed inspection rounds without a final verdict.', 'Inspect the run’s evidence requests before rerunning or review the PR manually.'],
+  workflow_interrupted: ['Cloudflare interrupted the review workflow before a recoverable result was stored.', 'Inspect the execution record before requesting another paid review.'],
+  review_launch_uncertain: ['The reviewer could not confirm whether its process started.', 'Inspect the existing sandbox execution; do not start a duplicate review.'],
   review_failed: ['The reviewer encountered a service or validation error and could not finish.', 'Inspect the private service logs for the run reference below, fix the failure, then rerun with `/review`.'],
 } as const;
 const schema = z.object({
@@ -28,6 +30,7 @@ const schema = z.object({
 // Only allowlisted diagnostics cross into public comments. Never forward raw
 // exception text, provider response bodies, credentials, or model output.
 export function holdReason(error: unknown) {
+  if (error instanceof Error && error.name === 'WorkflowInternalError') return { code: 'workflow_interrupted' as const };
   const message = error instanceof Error ? error.message : '';
   if (message.startsWith('file_too_large:')) {
     try {

@@ -60,7 +60,11 @@ for its own review budget. Outbound networking is denied except for the internal
 Responses proxy; arbitrary hosts, provider endpoints and paid provider tools are
 not allowed. Exact duplicate submissions cannot double-charge an ambiguous request.
 Streamed usage settles reservations, while missing usage retains them. The CLI's
-own automatic request/stream retries are disabled.
+own automatic request/stream retries are disabled. Completed output is separately
+checkpointed in the ledger before the launcher exits; delivery retries do not
+repeat inference. The result-delivery capability is separate from the model
+capability and stored in a root-only request file; unprivileged review commands
+cannot use their model token to submit a terminal result.
 
 The sandbox runs Codex and its commands as an unprivileged user. Scratch files
 persist within that fresh session and are destroyed afterward. Python 3.11,
@@ -73,6 +77,21 @@ and can repair routine setup failures. Network installs and hardware checks rema
 unavailable. Setup and Codex together have a 20-minute deadline, with an independent container shutdown at 22 minutes.
 Only one basic container can run at once. Provider credentials and GitHub publishing
 remain outside this environment even though Codex can execute arbitrary review code.
+
+Execution preparation atomically records the sandbox identity, scoped capability,
+merge base and $0.10 allowance. The runner starts one named background process;
+a durable launch claim prevents ambiguous acknowledgements from starting another.
+Workflows poll in short retryable steps rather than holding one RPC open for the
+whole session. The launcher checkpoints its bounded JSON output independently;
+polling can deliver the same output if that callback fails. Conflicting terminal
+outputs are rejected, and a saved output blocks further model calls.
+
+Cleanup and publication happen after checkpointing. Cleanup errors cannot replace
+a verdict, and a GitHub outage leaves the validated result pending for the
+reconciler. Interrupted workflows resume the same execution and saved output,
+including when remaining budget is below the admission floor. They never silently
+start a new paid session. An expired execution with no output remains incomplete.
+The old PR456 failure predates checkpointing and cannot be recovered retroactively.
 
 Each sandbox session reserves $0.10 conservatively against the same spending caps.
 That is a budget allowance, not a claim that Cloudflare charges ten cents. Its model
@@ -205,3 +224,13 @@ npx wrangler workflows instances describe inspect-robots-review RETURNED_INSTANC
 
 This management-only diagnostic also works for historical run charge IDs. It
 does not reset charges, change limits, or accept parameters from PR text.
+
+### Isolated recovery integration test
+
+`recovery-probe.wrangler.jsonc` deploys a separate temporary Worker, Workflow,
+ledger and container. `test/recovery-probe.ts` serves synthetic Responses events
+(no OpenAI key), runs the actual Codex CLI and one shell tool, and injects lost
+completion/cleanup acknowledgements. It has no GitHub publisher and does not
+review or comment on a real PR. Replay must preserve its terminal output with
+one launch and two synthetic model turns total. Delete the probe resources after
+verification; they are not part of the production service.

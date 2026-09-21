@@ -112,3 +112,13 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Cloudflare failed the execution step after roughly six minutes with WorkflowInternalError: "Attempt failed due to internal workflows error". Both instance diagnostics and the full-step recovery API report an errored step with no output. The service published a held notice with costs; no review verdict or test execution record from this run was recovered. This is an unresolved execution/durability failure, not a verified successful policy 3 review.
 - Public result: https://github.com/robocurve/inspect-robots/pull/456#issuecomment-5755747746
 - No second paid run was launched. A result-persistence/recovery improvement is needed before further paid verification; the exact underlying Cloudflare internal fault is not exposed by the available diagnostics.
+
+
+## Durable execution and result recovery
+
+- Replaced the single long-running Workflow RPC with a named background Codex process and short, retryable polling steps. SQLite atomically records the execution identity, scoped capabilities and one sandbox allowance before launch.
+- The root launcher saves its bounded terminal output directly to the ledger before exit. The trusted process poller can deliver the same artifact if the callback fails. Terminal output is immutable and blocks further model calls; ambiguous launch acknowledgements cannot launch a second process.
+- Result delivery uses a separate root-only capability. Codex and untrusted package builds cannot read its request file, and the model capability cannot authorize a checkpoint.
+- Workflow interruptions resume the same execution, including below the fresh-run admission floor. Cleanup errors cannot discard a saved review. Publication failures retain the validated verdict for the ten-minute reconciler.
+- TypeScript and 51 real Workers/SQLite tests passed, including concurrent preparation, eviction, lost acknowledgements, exhausted-budget recovery, capability separation, automatic resumption and delayed publication.
+- The original PR456 result predates this persistence path and remains unrecoverable. No new paid PR review was started, charges were not reset, and all spending limits remain unchanged.

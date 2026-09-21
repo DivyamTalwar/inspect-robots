@@ -9,6 +9,8 @@ import subprocess
 import tarfile
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from contextlib import suppress
 from pathlib import Path
 
@@ -290,11 +292,24 @@ def main():
         failure = "billing_hold"
     elif b"Review context limit reached" in errors:
         failure = "context_too_large"
-    print(
-        json.dumps(
-            {"exitCode": exit_code, "failure": failure, "review": review, "executions": executions}
-        )
+    output = json.dumps(
+        {"exitCode": exit_code, "failure": failure, "review": review, "executions": executions}
     )
+    # Persist independently of the Workflow's RPC lifetime. Only delivery retries,
+    # never inference. stdout remains a fallback for the trusted process poller.
+    endpoint = f"http://review-model.local/{request['checkpointToken']}/checkpoint"
+    for attempt in range(3):
+        try:
+            post = urllib.request.Request(
+                endpoint, data=output.encode(), headers={"Content-Type": "application/json"}
+            )
+            with urllib.request.urlopen(post, timeout=10) as response:
+                if response.status == 200:
+                    break
+        except (OSError, urllib.error.URLError):
+            if attempt < 2:
+                time.sleep(1)
+    print(output)
 
 
 if __name__ == "__main__":

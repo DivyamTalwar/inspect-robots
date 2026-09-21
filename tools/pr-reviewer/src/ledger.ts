@@ -1,5 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
-import { LIMITS, type Job } from './common';
+import { LIMITS, RunOutput, SHA, type Execution, type Job } from './common';
 
 export class ReviewLedger extends DurableObject<ReviewerEnv> {
   private reviewLimit(job: string, pr: number): number {
@@ -16,6 +16,8 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     super(ctx, env);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, pr INTEGER NOT NULL, head TEXT NOT NULL, base TEXT NOT NULL, scope TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued', result TEXT, notified INTEGER NOT NULL DEFAULT 0, created INTEGER NOT NULL)`);
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS charges (id TEXT PRIMARY KEY, job TEXT NOT NULL, pr INTEGER NOT NULL, month TEXT NOT NULL, amount INTEGER NOT NULL, settled INTEGER NOT NULL DEFAULT 0)`);
+    ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS executions (job TEXT PRIMARY KEY, token TEXT NOT NULL, sandbox TEXT NOT NULL, started INTEGER NOT NULL, mergeBase TEXT NOT NULL, checkpointToken TEXT, output TEXT)`);
+    if (!ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(executions)').toArray().some(c => c.name === 'checkpointToken')) ctx.storage.sql.exec('ALTER TABLE executions ADD COLUMN checkpointToken TEXT');
     ctx.storage.sql.exec(`CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
   }
   async register(job: Omit<Job, 'status' | 'result' | 'notified' | 'created'>): Promise<boolean> {
@@ -28,10 +30,17 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     return this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0] ?? null;
   }
   async pending(): Promise<Job[]> {
-    return this.ctx.storage.sql.exec<Job>("SELECT * FROM jobs WHERE status IN ('queued','running','approved') ORDER BY created LIMIT 100").toArray();
+    return this.ctx.storage.sql.exec<Job>("SELECT * FROM jobs WHERE status IN ('queued','running','approved','recovering','publishing') ORDER BY created LIMIT 100").toArray();
   }
   async finish(id: string, status: string, result: string | null = null): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE jobs SET status=?,result=? WHERE id=?', status, result, id);
+  }
+  async workflowInstance(id: string, instance?: string): Promise<string> {
+    if (instance !== undefined) {
+      if (!/^[a-zA-Z0-9_-]{1,100}$/.test(instance)) throw new Error('invalid_workflow_instance');
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)', `workflow-${id}`, instance);
+    }
+    return this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM settings WHERE key=?', `workflow-${id}`).toArray()[0]?.value ?? id;
   }
   async notified(id: string): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE jobs SET notified=1,status=? WHERE id=?', 'done', id);
@@ -56,6 +65,9 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
       headLimitMicros: this.reviewLimit(`${job.pr}-${job.head}`, job.pr), remainingMicros: await this.remaining(`${job.pr}-${job.head}`, job.pr) };
   }
   async reserve(id: string, job: string, pr: number, amount: number): Promise<boolean> {
+    return this.reserveNow(id, job, pr, amount);
+  }
+  private reserveNow(id: string, job: string, pr: number, amount: number): boolean {
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('invalid_amount');
     // All SQL is synchronous; the transaction cannot interleave with another reservation.
     return this.ctx.storage.transactionSync(() => {
@@ -66,6 +78,52 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
       if (sums.review + amount > this.reviewLimit(job, pr) || sums.pr + amount > LIMITS.pr || sums.month + amount > LIMITS.month) return false;
       this.ctx.storage.sql.exec('INSERT INTO charges(id,job,pr,month,amount) VALUES(?,?,?,?,?)', id, job, pr, month, amount);
       return true;
+    });
+  }
+  async execution(id: string): Promise<Execution | null> {
+    return this.ctx.storage.sql.exec<Execution>('SELECT token,checkpointToken,sandbox,started,mergeBase FROM executions WHERE job=?', id).toArray()[0] ?? null;
+  }
+  async prepareExecution(id: string, mergeBase: string): Promise<Execution> {
+    const existing = await this.execution(id);
+    if (existing) return existing;
+    const job = await this.job(id);
+    if (!job || !SHA.test(mergeBase)) throw new Error('invalid_review_request');
+    if (await this.remaining(`${job.pr}-${job.head}`, job.pr) < 2_000_000) throw new Error('insufficient_run_budget');
+    // Recheck after awaits; commit the charge, session and durable handle together.
+    return this.ctx.storage.transactionSync(() => {
+      const prior = this.ctx.storage.sql.exec<Execution>('SELECT token,checkpointToken,sandbox,started,mergeBase FROM executions WHERE job=?', id).toArray()[0];
+      if (prior) return prior;
+      if (!this.reserveNow(`${id}-sandbox`, `${job.pr}-${job.head}`, job.pr, 100_000)) throw new Error('budget_exhausted');
+      const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+      const checkpointToken = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+      const execution = { token, checkpointToken, sandbox: crypto.randomUUID(), started: Date.now(), mergeBase };
+      this.ctx.storage.sql.exec('INSERT INTO executions(job,token,sandbox,started,mergeBase,checkpointToken) VALUES(?,?,?,?,?,?)', id, token, execution.sandbox, execution.started, mergeBase, checkpointToken);
+      this.ctx.storage.sql.exec('INSERT INTO settings(key,value) VALUES(?,?)', `session-${token}`, JSON.stringify({ jobId: id, expires: execution.started + 25 * 60_000 }));
+      return execution;
+    });
+  }
+  async runOutput(id: string): Promise<string | null> {
+    return this.ctx.storage.sql.exec<{ output: string | null }>('SELECT output FROM executions WHERE job=?', id).toArray()[0]?.output ?? null;
+  }
+  async deliverCheckpoint(receipt: string, raw: string): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(receipt)) throw new Error('invalid_checkpoint_receipt');
+    const row = this.ctx.storage.sql.exec<{ token: string }>('SELECT token FROM executions WHERE checkpointToken=?', receipt).toArray()[0];
+    if (!row) throw new Error('invalid_checkpoint_receipt');
+    await this.checkpoint(row.token, raw);
+  }
+  async checkpoint(token: string, raw: string): Promise<void> {
+    const job = await this.session(token);
+    if (!job) throw new Error('invalid_review_session');
+    if (new TextEncoder().encode(raw).byteLength > 1_500_000) throw new Error('review_output_too_large');
+    const output = RunOutput.parse(JSON.parse(raw));
+    const failure = await this.sessionFailure(token);
+    if (failure) { output.failure = failure; output.exitCode = 1; output.review = null; }
+    const body = JSON.stringify(output);
+    this.ctx.storage.transactionSync(() => {
+      const row = this.ctx.storage.sql.exec<{ token: string; output: string | null }>('SELECT token,output FROM executions WHERE job=?', job.id).toArray()[0];
+      if (!row || row.token !== token) throw new Error('invalid_review_session');
+      if (row.output !== null && row.output !== body) throw new Error('conflicting_review_output');
+      this.ctx.storage.sql.exec('UPDATE executions SET output=? WHERE job=?', body, job.id);
     });
   }
   async settle(id: string, amount: number): Promise<boolean> {

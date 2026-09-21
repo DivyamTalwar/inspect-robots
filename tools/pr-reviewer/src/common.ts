@@ -37,6 +37,8 @@ export function renderCost(value: unknown): string {
   return `\n\nBudget: this run booked ${money(c.modelMicros)} for ${c.modelCalls} model calls, plus ${money(c.sandboxMicros)} sandbox allowance${c.reservedMicros ? ` and ${money(c.reservedMicros)} unresolved model reservations` : ''}. This revision has used ${money(c.headSpentMicros)} of ${money(c.headLimitMicros)} across all runs; ${money(c.remainingMicros)} remains under all spending caps. These are conservative ledger amounts, not an invoice.`;
 }
 export const ExecutionRecords = z.array(z.object({ revision: z.string().regex(/^[a-f0-9]{40}$/), command: z.string().max(12000), exitCode: z.number().int().nullable(), limit: z.string().nullable() })).max(100);
+export const RunOutput = z.object({ exitCode: z.number().int(), failure: z.string().max(100).nullable().optional(), review: z.unknown(), executions: ExecutionRecords.default([]) });
+export type Execution = { token: string; checkpointToken: string; sandbox: string; started: number; mergeBase: string };
 export type Snapshot = { number: number; head: string; base: string; title: string; body: string; draft: boolean; state: string; author: string };
 export type Job = { id: string; pr: number; head: string; base: string; scope: string; status: string; result: string | null; notified: number; created: number };
 

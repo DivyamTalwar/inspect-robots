@@ -53,20 +53,34 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
     try {
       if (this.env.ENABLED !== 'true') throw new Error('reviewer_disabled');
       await step.do('start', async () => {
+        await ledger.workflowInstance(job.id, event.instanceId);
         await ledger.finish(job.id, 'running');
         if (!await this.env.PUBLISHER.publish(job, null, 'started')) throw new Error('stale_revision');
       });
       const result = await runReview(this.env, job, step);
-      await step.do('save verdict', () => ledger.finish(job.id, result.verdict === 'APPROVE' ? 'approved' : 'publishing', JSON.stringify(result)));
+      await step.do('save verdict', () => ledger.finish(job.id, 'publishing', JSON.stringify(result)));
       const published = await step.do('publish verdict', () => this.env.PUBLISHER.publish(job, result));
       if (!published) await step.do('mark stale', () => ledger.finish(job.id, 'stale'));
-      else if (result.verdict !== 'APPROVE') await step.do('mark delivered', () => ledger.notified(job.id));
+      else if (result.verdict === 'APPROVE') await step.do('await required CI', () => ledger.finish(job.id, 'approved', JSON.stringify(result)));
+      else await step.do('mark delivered', () => ledger.notified(job.id));
       if (await ledger.warningNeeded()) {
         if (await step.do('publish budget warning', () => this.env.PUBLISHER.publish(job, null, 'budget-warning'))) await step.do('record budget warning', () => ledger.warningSent());
       }
     } catch (error) {
+      const saved = await ledger.job(job.id);
+      if (saved?.status === 'publishing' && saved.result) {
+        console.error(JSON.stringify({ event: 'review_publication_deferred', job: job.id }));
+        return; // Keep the validated verdict for the reconciler; do not overwrite it with a hold.
+      }
       // Never log external response bodies, prompts, code, headers or credentials.
       console.error(JSON.stringify({ job: job.id, status: 'held', error: error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'review_failed' }));
+      const execution = await ledger.execution(job.id);
+      if (execution && await ledger.runOutput(job.id) === null && Date.now() - execution.started < 22 * 60_000) {
+        // Leave the independent process/callback alive. The reconciler resumes
+        // polling this exact execution; prepareExecution never charges it twice.
+        await step.do('record recovery pending', () => ledger.finish(job.id, 'recovering'));
+        return;
+      }
       const details = { ...holdReason(error), cost_summary: await ledger.costs(job.id) };
       await step.do('record held', () => ledger.finish(job.id, 'held', JSON.stringify(details)));
       await step.do('publish hold', () => this.env.PUBLISHER.publish(job, details, 'held'));
@@ -86,14 +100,24 @@ async function scheduled(env: ReviewerEnv) {
         await enqueue(env, job.pr);
         continue;
       }
-      if (job.status === 'approved' && job.result && await ciGreen(p => read(env, p), job.head)) {
+      if (job.status === 'recovering') {
+        await env.REVIEW.create({ id: `${job.id}-recover-${Math.floor(Date.now() / 600000)}`, params: { id: job.id } });
+      } else if (job.status === 'publishing' && job.result) {
+        const result = JSON.parse(job.result);
+        if (await env.PUBLISHER.publish(job, result)) {
+          if (validateReview(result).verdict === 'APPROVE') await ledger.finish(job.id, 'approved', job.result);
+          else await ledger.notified(job.id);
+        }
+      } else if (job.status === 'approved' && job.result && await ciGreen(p => read(env, p), job.head)) {
         if (await env.PUBLISHER.publish(job, JSON.parse(job.result))) await ledger.notified(job.id);
       } else if (job.status === 'queued' || job.status === 'running') {
         let instance;
-        try { instance = await env.REVIEW.get(job.id); await instance.status(); }
-        catch { await env.REVIEW.create({ id: job.id, params: { id: job.id } }); continue; }
+        const instanceId = await ledger.workflowInstance(job.id);
+        try { instance = await env.REVIEW.get(instanceId); await instance.status(); }
+        catch { await env.REVIEW.create({ id: instanceId, params: { id: job.id } }); continue; }
         const status = await instance.status();
         if (['errored', 'terminated', 'complete'].includes(status.status)) {
+          if (await ledger.execution(job.id)) { await ledger.finish(job.id, 'recovering'); continue; }
           const details = { code: 'codex_review_incomplete', cost_summary: await ledger.costs(job.id) };
           await ledger.finish(job.id, 'held', JSON.stringify(details));
           await env.PUBLISHER.publish(job, details, 'held');
