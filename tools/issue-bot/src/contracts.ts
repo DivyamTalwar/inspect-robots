@@ -35,6 +35,7 @@ export const StageResult = z
       "NEEDS_INFO",
       "NOT_REPRODUCED",
       "DUPLICATE",
+      "FIX_PROPOSED",
       "REQUIRE_REVIEWER",
       "PLAN",
       "APPROVE",

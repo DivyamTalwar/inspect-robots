@@ -184,7 +184,7 @@ describe("trusted issue publication", () => {
       costMicros: 10,
     };
     const text = renderNotice(notice, { login: "reporter", type: "User" });
-    expect(text).toContain("@reporter");
+    expect(text).toContain("\n\n@reporter\n\n**Your action:** Provide");
     expect(text).not.toContain("@attacker");
     expect(text).not.toContain("<script>");
     expect(

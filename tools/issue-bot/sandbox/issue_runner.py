@@ -25,8 +25,10 @@ ROLES = {
         "Return CONFIRMED only with concrete evidence, supported contract and actual impact. "
         "Set serious only for data loss, safety/security defects or substantially broken "
         "supported behavior. Feature requests and uncertain contract choices are not confirmed "
-        "serious bugs. Consider duplicate/open PR evidence in context. Otherwise return "
-        "NEEDS_INFO, NOT_REPRODUCED, DUPLICATE or REQUIRE_REVIEWER with exact missing evidence."
+        "serious bugs. DUPLICATE means another issue reports the same bug; cite that issue. "
+        "Use FIX_PROPOSED when an existing open PR proposes a fix; cite that PR and do not "
+        "imply its fix has been verified. Otherwise return NEEDS_INFO, NOT_REPRODUCED or "
+        "REQUIRE_REVIEWER with exact missing evidence."
     ),
     "plan": (
         "Draft a bounded implementation plan addressing the confirmed defect. Read prior plan "

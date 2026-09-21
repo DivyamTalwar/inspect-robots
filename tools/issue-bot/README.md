@@ -21,12 +21,16 @@ barrier against bot merges into main.
 | CONFIRMED | Concrete evidence establishes the bug; Jay owns judgment. Serious, bounded, reproducible defects enter the fix workflow. |
 | NEEDS_INFO | Ask the actual issue author for specific missing evidence. Deleted/bot authors fall back to Jay. |
 | NOT_REPRODUCED | Explain the actual checks and limits; tag Jay. |
-| DUPLICATE | Existing report or open fix covers the work; tag Jay and avoid a competing PR. |
+| DUPLICATE | Another issue reports the same bug; cite that issue and tag Jay. |
+| FIX_PROPOSED | An existing open PR proposes a fix; tag Jay to review it without implying it is verified or merged. |
 | REQUIRE_REVIEWER | A technical, execution, budget, scope or validation blocker needs Jay. Include the latest findings and remaining checks. |
 | PR_READY | The reviewed fix passed CI and the PR was marked ready; tag Jay. |
 
 Trusted rendering chooses the status and mention. Model/issue prose cannot add
 mentions or HTML. Detailed evidence is expandable and bounded to GitHub's limit.
+Comments lead with `STATUS:`, `Issue summary:`, the owner mention on its own
+line, and `Your action:`. Missing-information requests mention the issue author;
+review and judgment requests mention `@jeqcho`.
 
 ## Workflow
 

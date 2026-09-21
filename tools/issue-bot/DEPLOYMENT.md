@@ -92,3 +92,21 @@ Approved limits: $20 per issue lifetime and $200 per UTC month, including the
 trial, all model stages and conservative container allowances.
 The user set the shared OpenAI project budget to $400/month for both bots;
 this does not raise either bot's own $200/month allowance.
+
+## Comment format and status correction
+
+On 2026-09-21, deployed the requested `STATUS`, `Issue summary`, owner mention,
+and `Your action` layout. `FIX_PROPOSED` now identifies an existing open fix PR;
+`DUPLICATE` refers only to another issue. Missing-information requests mention
+the issue author, with bot/deleted-author fallback to `@jeqcho`; review decisions
+mention `@jeqcho`.
+
+The #401 trial comment was corrected in place to `FIX_PROPOSED`, preserving its
+original evidence, spending and historical deduplication marker. No additional
+model run was performed. The predeployment queue/outbox inspection was empty,
+all 57 Worker tests and TypeScript passed, and independent review approved.
+
+- Publisher: `adcdd321-ac07-4f73-aa20-f7784f16f37f`
+- Coordinator: `56be36f5-dd7a-4c4e-b113-c5d87abbddc7`
+- Runner: `0330dd2f-f4c8-43dc-9ed6-046a9f20a082`
+- Image: `sha256:6bd48d77597659588aca1d56fa266ac96d186da68341bd7e324d2600526f576f`

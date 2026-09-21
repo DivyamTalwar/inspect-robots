@@ -189,6 +189,9 @@ describe("durable issue coordinator", () => {
       );
       expect((await l.job(id))?.state).toBe("done");
       expect((await l.job(id))?.next).toBeNull();
+      expect((await l.outbox())[0].publication.status).toBe(
+        duplicate ? "FIX_PROPOSED" : "CONFIRMED",
+      );
     }
   });
   it("deduplicates concurrent explicit retries of one issue", async () => {

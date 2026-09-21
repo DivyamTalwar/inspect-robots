@@ -523,6 +523,7 @@ export class IssueLedger extends DurableObject<IssueEnv> {
           "NEEDS_INFO",
           "NOT_REPRODUCED",
           "DUPLICATE",
+          "FIX_PROPOSED",
           "REQUIRE_REVIEWER",
         ].includes(r.status)
       )
@@ -533,7 +534,8 @@ export class IssueLedger extends DurableObject<IssueEnv> {
         r.evidence.length > 0 &&
         r.limitations.length === 0 &&
         !job.duplicate;
-      const status = job.duplicate ? "DUPLICATE" : r.status;
+      // The persisted legacy flag records an existing fix PR, not a duplicate issue.
+      const status = job.duplicate ? "FIX_PROPOSED" : r.status;
       this.notice(job, status, r.summary, [...r.evidence, ...r.limitations]);
       job.next = serious ? "plan" : null;
       if (!serious) job.state = "done";

@@ -19,6 +19,7 @@ const STATUSES = new Set([
   "NEEDS_INFO",
   "NOT_REPRODUCED",
   "DUPLICATE",
+  "FIX_PROPOSED",
   "REQUIRE_REVIEWER",
   "PLAN_APPROVED",
   "PR_READY",
@@ -54,19 +55,21 @@ export function renderNotice(
       : "jeqcho";
   const action =
     input.status === "NEEDS_INFO"
-      ? "please provide the missing information below."
+      ? "Provide the missing information below."
       : input.status === "PR_READY"
-        ? `please review PR #${input.pr}. The independent PR reviewer will assess the ready revision.`
+        ? `Review PR #${input.pr}. The independent PR reviewer will assess the ready revision.`
         : input.status === "FIXING"
-          ? "the confirmed bug is entering the plan and independent review workflow."
+          ? "No action needed yet. The confirmed bug is entering the plan and independent review workflow."
           : input.status === "DUPLICATE"
-            ? "an existing report or PR already covers this work; no competing fix was started."
-            : input.status === "REQUIRE_REVIEWER"
-              ? "please resolve the specific blocker below before this workflow continues."
-              : input.status === "NOT_REPRODUCED"
-                ? "the available evidence does not establish this bug; see the checks and limitations below."
-                : "please review the assessment below.";
-  return `**${input.status}**. ${safeText(input.summary, 4000)}\n\n@${target}, ${action}\n\n<details>\n<summary>Evidence and checks</summary>\n\n${safeText(input.details.join("\n\n"), 45000)}\n\nAutomated Astra/Codex assessment of base \`${input.issue.base}\`.\n</details>\n\nRecorded issue workflow spending: $${(input.costMicros / 1_000_000).toFixed(3)}. No merge or issue closure was performed.`;
+            ? "Check the referenced original issue and decide whether to close this report as a duplicate."
+            : input.status === "FIX_PROPOSED"
+              ? "Review the existing fix PR and verify that it resolves this issue. No competing fix was started."
+              : input.status === "REQUIRE_REVIEWER"
+                ? "Resolve the specific blocker below before this workflow continues."
+                : input.status === "NOT_REPRODUCED"
+                  ? "Review the checks and limitations below and decide what further investigation is needed."
+                  : "Review the assessment below.";
+  return `**STATUS:** ${input.status}\n\n**Issue summary:** ${safeText(input.summary, 4000)}\n\n@${target}\n\n**Your action:** ${action}\n\n<details>\n<summary>Evidence and checks</summary>\n\n${safeText(input.details.join("\n\n"), 45000)}\n\nAutomated Astra/Codex assessment of base \`${input.issue.base}\`.\n</details>\n\nRecorded issue workflow spending: $${(input.costMicros / 1_000_000).toFixed(3)}. No merge or issue closure was performed.`;
 }
 
 function validateIdentity(input: {

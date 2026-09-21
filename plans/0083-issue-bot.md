@@ -39,7 +39,8 @@ deliveries, including failure notices. Ambiguous failures retain cost reservatio
 Each stage is a fresh ephemeral Codex exec using gpt-6-astra with high reasoning:
 
 1. TRIAGE: independently inspect pinned source and issue evidence. Emit
-   CONFIRMED, NEEDS_INFO, NOT_REPRODUCED, DUPLICATE or REQUIRE_REVIEWER.
+   CONFIRMED, NEEDS_INFO, NOT_REPRODUCED, DUPLICATE, FIX_PROPOSED or REQUIRE_REVIEWER.
+   DUPLICATE refers to another issue; FIX_PROPOSED refers to an existing open fix PR.
    CONFIRMED requires concrete reproduction/evidence, severity and bounded scope.
    Only serious confirmed bugs (data loss, safety failure, security defect or
    substantial broken supported behavior) qualify for automatic implementation.
