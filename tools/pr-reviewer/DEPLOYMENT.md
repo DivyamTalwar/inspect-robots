@@ -17,7 +17,7 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
 - Publisher version: `37cd6349-4e41-4423-9e30-1c9c438af6a9`.
-- Reviewer version: `41f24283-c5ad-4125-b011-39fa9ca42c44`.
+- Reviewer version: `5654f1a3-9285-49cd-94f4-ed4a2a0facca`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -132,3 +132,4 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 
 - The maintainer requested another budget increase and one fresh review. Raised only PR456's lifetime cap and head `696fbaa9a00d7c345a81dd179fa10934f51ade89` to $25 cumulative, leaving $11.942520 before launch. Existing charges remain intact. Other heads retain $5, other PRs retain $15 lifetime, and the shared monthly cap remains $200.
 - Added deployment-only PR lifetime exceptions, validated against the monthly cap. TypeScript and all 52 Workers/SQLite tests passed, including concurrent reservations, the exact-head restriction, unchanged defaults for other PRs, and the shared monthly ceiling.
+- Deployed reviewer `5654f1a3-9285-49cd-94f4-ed4a2a0facca`. Read-only `cap25-budget-audit` verified the preserved $13.057480 usage and $11.942520 remaining. A single `/review` command started workflow `82b6d76a1771181c06ccb05cf0eda0a4681a6b4b12be06f1` on the unchanged PR456 head.
