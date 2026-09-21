@@ -375,3 +375,107 @@ describe('Durable Object connection recovery', () => {
     expect(publish.mock.calls.some(c => c[2] === 'held')).toBe(false);
   });
 });
+
+// Exercise signed webhook -> SQLite registration -> reconciliation -> Workflow,
+// including platform IDs that cannot be reused once a Workflow already exists.
+describe('ready and reopened PR lifecycle', () => {
+  it.each(['draft', 'closed'] as const)('reviews an unstarted %s PR again at the same revision, without duplicate execution', async state => {
+    const s = setup(); let live = { ...pr };
+    const read = s.read.getMockImplementation()!;
+    s.read.mockImplementation(async p => p === '/pulls/9' ? JSON.stringify(live) : read(p));
+    const instances = new Set<string>();
+    s.create.mockImplementation(async options => {
+      if (instances.has(options!.id!)) throw new Error('workflow_already_exists');
+      instances.add(options!.id!);
+      return {} as WorkflowInstance;
+    });
+    const event = (action: string) => webhook({ ...repo, action, number: 9 }, 'pull_request');
+    await handleWebhook(await event('opened'), s.config);
+    const original = (await s.ledger.pending())[0];
+    // Spending from an earlier manual run must remain charged across revival.
+    await s.ledger.reserve('prior-manual-run', `9-${head}`, 9, 1_000_000);
+    const ids = [original.id];
+    for (let cycle = 0; cycle < 2; cycle++) {
+      live = { ...pr, draft: state === 'draft', state: state === 'closed' ? 'closed' : 'open' };
+      await worker.scheduled({} as ScheduledController, s.config as any);
+      expect(await s.ledger.pending()).toEqual([]);
+      expect((await s.ledger.job(ids.at(-1)!))?.status).toBe('stale');
+      live = { ...pr };
+      const action = state === 'draft' ? 'ready_for_review' : 'reopened';
+      await Promise.all([1, 2].map(async () => handleWebhook(await event(action), s.config)));
+      const pending = await s.ledger.pending();
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({ head, base, status: 'queued' });
+      expect(ids).not.toContain(pending[0].id);
+      ids.push(pending[0].id);
+      expect(s.create).toHaveBeenCalledTimes(cycle + 2);
+      expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_000_000);
+    }
+    s.config.RUNNER.start.mockImplementation(async (...args: any[]) => { await s.ledger.checkpoint(args[5], completeOutput); });
+    const publish = vi.fn(async () => true);
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: { ...s.config, PUBLISHER: { ...s.config.PUBLISHER, publish } } });
+    // An old sleeping workflow wakes after replacement. It must stay obsolete.
+    await workflow.run({ instanceId: original.id, payload: { id: original.id } } as any, s.step as WorkflowStep);
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+    const id = ids.at(-1)!;
+    await workflow.run({ instanceId: id, payload: { id } } as any, s.step as WorkflowStep);
+    expect((await s.ledger.job(id))?.status).toBe('approved');
+    expect(s.config.RUNNER.start).toHaveBeenCalledTimes(1);
+    expect((await s.ledger.job(original.id))?.status).toBe('stale');
+    expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(3_900_000);
+  });
+  it('does not duplicate a still-queued review when ready/reopened notifications repeat', async () => {
+    const s = setup();
+    for (const action of ['opened', 'ready_for_review', 'reopened', 'edited']) {
+      await handleWebhook(await webhook({ ...repo, action, number: 9 }, 'pull_request'), s.config);
+    }
+    expect(s.create).toHaveBeenCalledTimes(1);
+    expect(await s.ledger.pending()).toHaveLength(1);
+  });
+  it('recovers a replacement after Workflow creation fails without losing registration', async () => {
+    const s = setup();
+    const request = () => webhook({ ...repo, action: 'reopened', number: 9 }, 'pull_request');
+    await handleWebhook(await request(), s.config);
+    const original = (await s.ledger.pending())[0];
+    await s.ledger.finish(original.id, 'stale');
+    s.create.mockRejectedValueOnce(new Error('workflow service unavailable'));
+    await expect(handleWebhook(await request(), s.config)).rejects.toThrow('workflow service unavailable');
+    const replacement = (await s.ledger.pending())[0];
+    expect(replacement.id).not.toBe(original.id);
+    await handleWebhook(await request(), s.config);
+    expect(s.create).toHaveBeenCalledTimes(2);
+    const get = vi.fn(async () => { throw new Error('workflow not created'); });
+    await worker.scheduled({} as ScheduledController, { ...s.config, REVIEW: { ...s.config.REVIEW, get } } as any);
+    expect(s.create).toHaveBeenLastCalledWith({ id: replacement.id, params: { id: replacement.id } });
+    expect(s.create).toHaveBeenCalledTimes(3);
+    expect((await s.ledger.costs(replacement.id)).sandboxMicros).toBe(0);
+  });
+  it('does not automatically replace started or charged stale jobs', async () => {
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
+    const execution = await s.ledger.prepareExecution(job.id, base);
+    await s.ledger.finish(job.id, 'stale');
+    expect(await s.ledger.enqueueJob(job)).toBeNull();
+    expect(await s.ledger.execution(job.id)).toEqual(execution);
+    const charged = { ...job, id: 'legacy-charged' };
+    await s.ledger.register(charged);
+    await s.ledger.reserve(`${charged.id}-codex-reservation`, `9-${head}`, 9, 500_000);
+    await s.ledger.finish(charged.id, 'stale');
+    expect(await s.ledger.enqueueJob(charged)).toBeNull();
+    expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_400_000);
+  });
+  it('prevents an admitted stale workflow from starting or charging after replacement', async () => {
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
+    expect(await s.ledger.startReview(job.id)).toBe(true);
+    await s.ledger.finish(job.id, 'stale');
+    const replacement = await s.ledger.enqueueJob(job);
+    expect(replacement).not.toBeNull();
+    expect(await s.ledger.startReview(job.id)).toBe(false);
+    await expect((async () => await s.ledger.prepareExecution(job.id, base))()).rejects.toThrow('stale_revision');
+    expect((await s.ledger.job(job.id))?.status).toBe('stale');
+    expect(await s.ledger.execution(job.id)).toBeNull();
+    expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(5_000_000);
+    await s.ledger.releaseReviewSlot(job.id);
+    expect(await s.ledger.claimReviewSlot(replacement!)).toBe('acquired');
+  });
+});

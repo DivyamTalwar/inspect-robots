@@ -254,6 +254,11 @@ consistency, publication boundaries and ambiguous model failures. CI runs them
 without production credentials.
 They also cover concurrent ready events, durable FIFO ownership, zero spending
 while waiting, cleanup failures and both failure-notice publication paths.
+An unstarted job abandoned when a PR becomes draft or closes is replaced on a
+ready/reopened event, even at the same revision. Repeated events share that new
+job; its predecessor cannot start or spend. Historical charges still count
+against the same head, PR and monthly limits. Started or already reviewed jobs
+require an explicit `/review` to request another run.
 `sandbox/test_evidence.py` runs offline as root inside the review image. Its real
 Python build backend attempts source/context replacement, parent-directory
 renames, permission changes and result forgery; all must fail while package

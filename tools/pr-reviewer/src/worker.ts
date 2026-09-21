@@ -19,8 +19,8 @@ async function enqueue(env: WebhookEnvironment, pr: number, scope = '', requestI
   if (info.state !== 'open' || info.draft) return;
   const id = (await digest(`${pr}:${info.head}:${info.base}:${POLICY_VERSION}:${scope}:${requestId}`)).slice(0, 48);
   const ledger = () => env.LEDGER.getByName('budget');
-  const registered = await ledger().register({ id, pr, head: info.head, base: info.base, scope });
-  if (registered) await env.REVIEW.create({ id, params: { id } });
+  const queuedId = await ledger().enqueueJob({ id, pr, head: info.head, base: info.base, scope });
+  if (queuedId) await env.REVIEW.create({ id: queuedId, params: { id: queuedId } });
 }
 
 export async function handleWebhook(request: Request, env: WebhookEnvironment): Promise<Response> {
@@ -102,11 +102,13 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
       // Bound Workflow history for arbitrarily long queues. Reconciliation starts
       // another waiting instance with the same job and FIFO position, without spend.
       if (!admitted) return;
-      await step.do('start', async () => {
+      const started = await step.do('start', async () => {
+        if (!await ledger().startReview(job.id)) return false;
         await ledger().workflowInstance(job.id, event.instanceId);
-        await ledger().finish(job.id, 'running');
         if (!await this.env.PUBLISHER.publish(job, null, 'started')) throw new Error('stale_revision');
+        return true;
       });
+      if (started === false) return;
       const result = await runReview(this.env, job, step);
       await step.do('save verdict', () => ledger().finish(job.id, 'publishing', JSON.stringify(result)));
       const published = await step.do('publish verdict', () => this.env.PUBLISHER.publish(job, result));
@@ -118,6 +120,7 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
       }
     } catch (error) {
       const saved = await ledger().job(job.id);
+      if (saved?.status === 'stale') return;
       if (saved?.result && ['publishing', 'approved', 'done'].includes(saved.status)) {
         console.error(JSON.stringify({ event: 'review_publication_deferred', job: job.id }));
         return; // Keep the validated verdict for the reconciler; do not overwrite it with a hold.

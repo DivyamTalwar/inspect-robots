@@ -34,6 +34,26 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     this.ctx.storage.sql.exec('INSERT INTO jobs(id,pr,head,base,scope,created) VALUES(?,?,?,?,?,?)', job.id, job.pr, job.head, job.base, job.scope, Date.now());
     return true;
   }
+  async enqueueJob(job: Omit<Job, 'status' | 'result' | 'notified' | 'created'>): Promise<string | null> {
+    return this.ctx.storage.transactionSync(() => {
+      const key = `latest-job-${job.id}`;
+      const latest = this.ctx.storage.sql.exec<{ value: string }>('SELECT value FROM settings WHERE key=?', key).toArray()[0]?.value ?? job.id;
+      const old = this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', latest).toArray()[0];
+      if (old) {
+        // Only replace abandoned, unstarted work. Keep historical jobs immutable
+        // so their sleeping Workflows cannot share the replacement's execution.
+        if (old.status !== 'stale' || old.result || old.notified) return null;
+        if (this.ctx.storage.sql.exec('SELECT job FROM executions WHERE job=?', latest).toArray().length) return null;
+        if (this.ctx.storage.sql.exec('SELECT id FROM charges WHERE substr(id,1,?)=? LIMIT 1', latest.length + 1, `${latest}-`).toArray().length) return null;
+      }
+      const id = old ? crypto.randomUUID().replace(/-/g, '') : job.id;
+      this.ctx.storage.sql.exec('INSERT INTO jobs(id,pr,head,base,scope,created) VALUES(?,?,?,?,?,?)', id, job.pr, job.head, job.base, job.scope, Date.now());
+      this.ctx.storage.sql.exec('INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)', key, id);
+      // Per-head, per-PR and monthly charges remain untouched. The queued row is
+      // also the reconciler's outbox if Workflow creation or its response fails.
+      return id;
+    });
+  }
   async job(id: string): Promise<Job | null> {
     return this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0] ?? null;
   }
@@ -100,6 +120,14 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
   async finish(id: string, status: string, result: string | null = null): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE jobs SET status=?,result=? WHERE id=?', status, result, id);
   }
+  async startReview(id: string): Promise<boolean> {
+    return this.ctx.storage.transactionSync(() => {
+      const job = this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0];
+      if (this.slotOwner() !== id || !job || !['queued', 'running', 'recovering', 'publishing'].includes(job.status)) return false;
+      this.ctx.storage.sql.exec("UPDATE jobs SET status='running' WHERE id=?", id);
+      return true;
+    });
+  }
   async workflowInstance(id: string, instance?: string): Promise<string> {
     if (instance !== undefined) {
       if (!/^[a-zA-Z0-9_-]{1,100}$/.test(instance)) throw new Error('invalid_workflow_instance');
@@ -158,11 +186,13 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     if (!job || !SHA.test(mergeBase)) throw new Error('invalid_review_request');
     if (await this.remaining(`${job.pr}-${job.head}`, job.pr) < 2_000_000) throw new Error('insufficient_run_budget');
     // Recheck after awaits; commit the charge, session and durable handle together.
-    return this.ctx.storage.transactionSync(() => {
+    const prepared = this.ctx.storage.transactionSync(() => {
       if (this.queuePausedNow()) throw new Error('review_service_paused');
       const prior = this.ctx.storage.sql.exec<Execution>('SELECT token,checkpointToken,sandbox,started,mergeBase FROM executions WHERE job=?', id).toArray()[0];
       if (prior) return prior;
       if (this.slotOwner() !== id) throw new Error('review_slot_required');
+      const live = this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).one();
+      if (!['queued', 'running', 'recovering'].includes(live.status)) return null;
       if (!this.reserveNow(`${id}-sandbox`, `${job.pr}-${job.head}`, job.pr, 100_000)) throw new Error('budget_exhausted');
       const token = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
       const checkpointToken = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
@@ -171,6 +201,8 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
       this.ctx.storage.sql.exec('INSERT INTO settings(key,value) VALUES(?,?)', `session-${token}`, JSON.stringify({ jobId: id, expires: execution.started + 25 * 60_000 }));
       return execution;
     });
+    if (!prepared) throw new Error('stale_revision');
+    return prepared;
   }
   async runOutput(id: string): Promise<string | null> {
     return this.ctx.storage.sql.exec<{ output: string | null }>('SELECT output FROM executions WHERE job=?', id).toArray()[0]?.output ?? null;
