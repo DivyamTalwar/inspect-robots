@@ -43,11 +43,13 @@ export async function handleWebhook(request: Request, env: WebhookEnvironment): 
   return new Response('Accepted', { status: 202 });
 }
 
-export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string }> {
-  async run(event: WorkflowEvent<{ id: string }>, step: WorkflowStep) {
+export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string; inspectOnly?: boolean }> {
+  async run(event: WorkflowEvent<{ id: string; inspectOnly?: boolean }>, step: WorkflowStep) {
     const ledger = this.env.LEDGER.getByName('budget');
     const job: Job | null = JSON.parse(await step.do('load job', async () => JSON.stringify(await ledger.job(event.payload.id))));
     if (!job) throw new Error('unknown_job');
+    // Cloudflare management API only; never accepted from a webhook or PR text.
+    if (event.payload.inspectOnly === true) return ledger.costs(job.id);
     try {
       if (this.env.ENABLED !== 'true') throw new Error('reviewer_disabled');
       await step.do('start', async () => {
@@ -65,8 +67,9 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
     } catch (error) {
       // Never log external response bodies, prompts, code, headers or credentials.
       console.error(JSON.stringify({ job: job.id, status: 'held', error: error instanceof Error && /^[a-z_]+$/.test(error.message) ? error.message : 'review_failed' }));
-      await step.do('record held', () => ledger.finish(job.id, 'held'));
-      await step.do('publish hold', () => this.env.PUBLISHER.publish(job, holdReason(error), 'held'));
+      const details = { ...holdReason(error), cost_summary: await ledger.costs(job.id) };
+      await step.do('record held', () => ledger.finish(job.id, 'held', JSON.stringify(details)));
+      await step.do('publish hold', () => this.env.PUBLISHER.publish(job, details, 'held'));
     }
   }
 }
@@ -91,8 +94,9 @@ async function scheduled(env: ReviewerEnv) {
         catch { await env.REVIEW.create({ id: job.id, params: { id: job.id } }); continue; }
         const status = await instance.status();
         if (['errored', 'terminated', 'complete'].includes(status.status)) {
-          await ledger.finish(job.id, 'held');
-          await env.PUBLISHER.publish(job, null, 'held');
+          const details = { code: 'codex_review_incomplete', cost_summary: await ledger.costs(job.id) };
+          await ledger.finish(job.id, 'held', JSON.stringify(details));
+          await env.PUBLISHER.publish(job, details, 'held');
         }
       }
     } catch { console.error(JSON.stringify({ job: job.id, status: 'reconcile_failed' })); }

@@ -12,6 +12,8 @@ export async function runReview(env: ReviewEnvironment, job: Job, step: Pick<Wor
   const context = JSON.parse(await step.do('gather review discussion', noRetry, async () => JSON.stringify(await collectContext(read, job))));
   const raw = await step.do('run fresh Codex reviewer', { ...noRetry, timeout: '25 minutes' }, async () => {
     console.log(JSON.stringify({ event: 'review_allowance', job: job.id, remainingMicros: await ledger.remaining(`${job.pr}-${job.head}`, job.pr) }));
+    // Do not spend on another fresh session with only debugging leftovers.
+    if (await ledger.remaining(`${job.pr}-${job.head}`, job.pr) < 2_000_000) throw new Error('insufficient_run_budget');
     if (!await ledger.reserve(`${job.id}-sandbox`, `${job.pr}-${job.head}`, job.pr, 100_000)) throw new Error('budget_exhausted');
     const token = await ledger.openSession(job.id);
     try {
@@ -28,5 +30,5 @@ export async function runReview(env: ReviewEnvironment, job: Job, step: Pick<Wor
     try { await readFile(read, job, blocker.file, 'head', blocker.line, 1); }
     catch { await readFile(read, { ...job, base: context.merge_base }, blocker.file, 'base', blocker.line, 1); }
   }
-  return { ...result, execution_records: output.executions ?? [] };
+  return { ...result, execution_records: output.executions ?? [], cost_summary: await ledger.costs(job.id) };
 }

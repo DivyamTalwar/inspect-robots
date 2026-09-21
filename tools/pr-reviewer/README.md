@@ -14,7 +14,8 @@ PR content cannot replace it.
 | --- | --- | --- |
 | APPROVE | Worthwhile, established scope, sufficient evidence, no blockers | Tag `@jeqcho` to merge after `ci-ok` is green on the reviewed head |
 | REQUEST_CHANGES | Established scope with concrete implementation defects | Explain the trigger, expected/actual behavior, impact and fix |
-| ESCALATE | Scope, necessity, competing proposals or missing evidence needs judgment | Tag `@jeqcho` with a precise decision; closure is only a recommendation |
+| ESCALATE | Scope, necessity or competing proposals need human judgment | Tag `@jeqcho` with a precise decision; closure is only a recommendation |
+| INCOMPLETE | Inspection or checks could not finish | List remaining checks; no request for a product decision |
 
 Comments start with a one- or two-sentence TL;DR describing the change and the
 reason for the verdict, followed immediately by the requested action. Detailed
@@ -64,8 +65,12 @@ own automatic request/stream retries are disabled.
 The sandbox runs Codex and its commands as an unprivileged user. Scratch files
 persist within that fresh session and are destroyed afterward. Python 3.11,
 NumPy, pytest, hypothesis, pip, Hatch and rg are preinstalled. Offline local package
-builds are allowed. Network dependency installs and hardware checks are unavailable.
-Codex has a 20-minute deadline, with an independent container shutdown at 22 minutes.
+builds run automatically for core and changed Python packages, using a disposable
+copy of the source and synthetic version 0.0.0. Installation is offline, without
+dependencies or build isolation, as the same unprivileged user; each package has
+a 45-second limit and setup has a 2-minute total limit. Codex receives setup.json
+and can repair routine setup failures. Network installs and hardware checks remain
+unavailable. Setup and Codex together have a 20-minute deadline, with an independent container shutdown at 22 minutes.
 Only one basic container can run at once. Provider credentials and GitHub publishing
 remain outside this environment even though Codex can execute arbitrary review code.
 
@@ -104,9 +109,16 @@ Codex continues across turns within the total budget and session deadline.
 Confirmed cache reads settle at the published $1/M rate; other input settles at
 the conservative $13/M ceiling. Reservations never assume a future cache hit.
 The gateway supplies the remaining budget each turn and requests a final answer
-before further investigation becomes unaffordable. If material evidence is
-missing, that answer must escalate. The ledger can still reach its limit before
+when less than $0.30 remains after reserving the current uncached input. It no
+longer requires space for two full uncached histories before allowing investigation.
+If material evidence is missing, the result is INCOMPLETE, not a product escalation. The ledger can still reach its limit before
 the OpenAI bill does. See [Astra pricing](https://developers.openai.com/api/docs/models/gpt-6-astra).
+
+Fresh runs require at least $2 remaining before any sandbox/model spending. This
+is an admission floor, not a guarantee that a large PR will finish for $2. Reruns
+share the original caps; failed runs do not reset the ledger. Published results
+and holds include separate per-run settled model charges, unresolved reservations,
+sandbox allowance, cumulative revision spending and remaining allowance.
 
 No inference submission retries automatically. Ambiguous failures retain the
 full reservation, including across a process restart. Only retrieval/publication
@@ -180,3 +192,16 @@ step sleeps do not incur Workflow CPU time. See [Workflow pricing](https://devel
 and [Durable Objects pricing](https://developers.cloudflare.com/durable-objects/platform/pricing/).
 
 Sandbox execution additionally uses Cloudflare Containers CPU, memory and disk. The runner scales to zero and permits one basic instance. Budget allowances bound requested executions conservatively, but the Cloudflare invoice is separate from OpenAI and its $5 base subscription. See [Containers pricing](https://developers.cloudflare.com/containers/platform/pricing/). Docker is needed to build/deploy the runner image.
+
+### Read-only run accounting
+
+Cloudflare operators can retrieve ledger totals for an existing run without
+starting Codex or publishing a comment:
+
+```sh
+npx wrangler workflows trigger inspect-robots-review '{"id":"EXISTING_RUN_ID","inspectOnly":true}' --json
+npx wrangler workflows instances describe inspect-robots-review RETURNED_INSTANCE_ID --json
+```
+
+This management-only diagnostic also works for historical run charge IDs. It
+does not reset charges, change limits, or accept parameters from PR text.

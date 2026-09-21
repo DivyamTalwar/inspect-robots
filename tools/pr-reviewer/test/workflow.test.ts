@@ -78,6 +78,13 @@ describe('Codex review lifecycle', () => {
     expect(await s.ledger.session(capability)).toBeNull();
     expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(4_900_000);
   });
+  it('declines an underfunded rerun without starting a sandbox or spending more', async () => {
+    const s = setup(); await s.ledger.register(job);
+    await s.ledger.reserve('earlier-run', `9-${head}`, 9, 3_100_000);
+    await expect(runReview(s.config as any, job, s.step)).rejects.toThrow('insufficient_run_budget');
+    expect(s.config.RUNNER.review).not.toHaveBeenCalled();
+    expect(await s.ledger.remaining(`9-${head}`, 9)).toBe(1_900_000);
+  });
   it('never accepts a partial verdict or retries a failed Codex session', async () => {
     const s = setup(); await s.ledger.register(job);
     await expect(runReview(s.config as any, job, s.step)).rejects.toThrow('codex_review_incomplete');

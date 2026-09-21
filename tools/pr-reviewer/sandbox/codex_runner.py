@@ -3,9 +3,11 @@
 import json
 import os
 import selectors
+import shutil
 import signal
 import subprocess
 import tarfile
+import tempfile
 import time
 from contextlib import suppress
 from pathlib import Path
@@ -38,8 +40,96 @@ def unpack(archive_path, root):
                 target.chmod(member.mode & 0o777)
 
 
+def prepare_packages(workspace, environment, revision):
+    """Build changed local Python packages offline as the same unprivileged user.
+
+    Build a disposable copy so backend writes cannot contaminate the source diff.
+    Failures remain visible to Codex; unsupported dependencies never block inspection.
+    """
+    head, base = workspace / "head", workspace / "base"
+    projects = []
+    for config in sorted(head.rglob("pyproject.toml")):
+        relative = config.parent.relative_to(head)
+        changed = (
+            relative == Path(".")
+            or any(
+                not (base / f.relative_to(head)).is_file()
+                or f.read_bytes() != (base / f.relative_to(head)).read_bytes()
+                for f in config.parent.rglob("*")
+                if f.is_file()
+            )
+            or any(
+                not (head / f.relative_to(base)).is_file()
+                for f in (base / relative).rglob("*")
+                if f.is_file()
+            )
+        )
+        if changed:
+            projects.append(relative)
+    build = workspace / "build-source"
+    shutil.copytree(head, build)
+    subprocess.run(["chown", "-R", "65534:65534", str(build)], check=True)
+    deadline = time.monotonic() + 120
+    results, executions = [], []
+    for relative in projects:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            results.append({"package": str(relative), "status": "setup_time_limit"})
+            continue
+        command = [
+            "/opt/review-env/bin/python",
+            "-m",
+            "pip",
+            "install",
+            "--no-deps",
+            "--no-build-isolation",
+            "--no-index",
+            "--disable-pip-version-check",
+            "--target",
+            str(workspace / "python-packages"),
+            str(build / relative),
+        ]
+        timed_out = False
+        with tempfile.TemporaryFile() as log:
+            process = subprocess.Popen(
+                command,
+                cwd=build,
+                env={**environment, "SETUPTOOLS_SCM_PRETEND_VERSION": "0.0.0"},
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                user=65534,
+                group=65534,
+                extra_groups=[],
+            )
+            try:
+                code = process.wait(timeout=min(45, remaining))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                code = None
+            finally:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait(timeout=5)
+            log.seek(0, os.SEEK_END)
+            log.seek(max(0, log.tell() - 6000))
+            output = log.read().decode(errors="replace")
+        results.append({"package": str(relative), "exitCode": code, "output": output})
+        executions.append(
+            {
+                "revision": revision,
+                "command": " ".join(command),
+                "exitCode": code,
+                "limit": "setup_timeout" if timed_out else None,
+            }
+        )
+    (workspace / "setup.json").write_text(json.dumps(results))
+    return executions
+
+
 def main():
     """Launch a fresh CLI session and return only validated-shape diagnostics."""
+    deadline = time.monotonic() + 1200
     request = json.loads(Path("/tmp/request.json").read_text())
     workspace = Path("/workspace/review")
     unpack("/tmp/head.tar.gz", workspace / "head")
@@ -54,18 +144,22 @@ def main():
         "PATH": "/opt/review-env/bin:/usr/local/bin:/usr/bin:/bin",
         "HOME": str(home),
         "CODEX_HOME": str(home / ".codex"),
-        "PYTHONPATH": f"{workspace}/head/.review-packages:{workspace}/head/src",
+        "PYTHONPATH": (
+            f"{workspace}/python-packages:{workspace}/head/.review-packages:{workspace}/head/src"
+        ),
         "PYTHONDONTWRITEBYTECODE": "1",
         "PIP_NO_INDEX": "1",
         "UV_OFFLINE": "1",
         "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
         "CI": "1",
     }
+    executions = prepare_packages(workspace, environment, request["head"])
     prompt = (
         "Review the PR described in /workspace/review/context.json using the supplied policy. "
         "The complete immutable head snapshot is /workspace/review/head and its merge-base "
         "snapshot is /workspace/review/base. Start with git diff --no-index --stat and "
         "--name-status between those directories (exit 1 means differences, not failure). "
+        "Read /workspace/review/setup.json for offline package installation results. "
         "Track changed-file coverage and inspect per-file diffs in bounded batches; do not "
         "dump the whole directory diff or context JSON. Read the PR description, relevant "
         "discussion and base CLAUDE.md, then prioritize changed code, tests and focused "
@@ -138,8 +232,6 @@ def main():
     streams.register(process.stderr, selectors.EVENT_READ, "stderr")
     pending = b""
     errors = bytearray()
-    executions = []
-    deadline = time.monotonic() + 1200
     timed_out = False
     while streams.get_map():
         if time.monotonic() >= deadline:

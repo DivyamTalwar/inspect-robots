@@ -11,13 +11,13 @@ Current status: live in advisory mode for new non-draft PRs and revisions.
   completed successfully. Input count matched actual usage: 37 input tokens,
   13 output tokens, approximately $0.00102 at standard rates.
 - Worker bundles passed Wrangler dry-run compilation.
-- TypeScript and 35 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
+- TypeScript and 39 offline policy, ledger, gateway and orchestration tests passed. Obsolete custom-loop tests were replaced by Codex gateway/lifecycle tests.
 - Core checks passed: Ruff, formatting, mypy, 1,720 pytest tests with 100% core
   coverage. Six optional rerun-sdk tests skipped because that extra is absent.
 - Clean npm install succeeded; dependency audit reported zero vulnerabilities.
 - Workers Paid enabled by the maintainer. The reviewer and publisher deployed successfully.
-- Publisher version: `58beaa09-97d5-4104-b99b-98ae0fffaa3e`.
-- Reviewer version: `7fa3b5f7-fac0-4712-954f-2025d5d42f2a`.
+- Publisher version: `37cd6349-4e41-4423-9e30-1c9c438af6a9`.
+- Reviewer version: `6a045f95-f833-40ff-a7d1-043219329579`.
 - Receiver: https://inspect-robots-reviewer.jay-7f4.workers.dev/webhook
 - Health endpoint reports advisory mode and `enabled: true`.
 - GitHub private key, OpenAI key and generated HMAC secret uploaded securely.
@@ -65,7 +65,7 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - Diagnostic run `230721d16d351acd424c9633cb672b40619b430a06f4d553` confirmed $0.244662 remaining in the conservative head ledger. This is not an invoice total: earlier settlement charged every input token at the non-cached ceiling.
 - Corrected future settlement to credit confirmed cache reads at $1/M, added final-turn budget steering, and preserved budget-stop reasons independently of CLI stderr. Existing charges remain unchanged because historical cache usage was not retained.
 - No further paid trial was started after these fixes. A complete end-to-end verdict on PR #456 remains pending additional authorized trial allowance. The $5/head, $15/PR and $200/month limits remain unchanged.
-- Runner version: `a9422b3f-3fa8-439c-9bc2-f410a43c3130`.
+- Runner version: `a7f49577-cfd0-45a4-9714-54b2fa981059`.
 
 ## Authorized trial budget exception
 
@@ -90,3 +90,14 @@ rollout decision. Implementation is tracked in PR #455; deployment is already li
 - The CLI now starts with a changed-file inventory and bounded per-file diffs, prioritizes changed code/tests, tracks coverage, and avoids repeated full-file/context dumps.
 - Verified maintainer comments are separated from other discussion, without calling every comment a decision. Bare review commands and prior bot verdicts are excluded, including linked discussions.
 - TypeScript, 35 offline reviewer tests, and Python launcher lint/format checks passed. No paid rerun was requested for this policy update; future behavior has not yet been evaluated in a live review.
+
+## Review policy version 3: setup, cutoff and accounting
+
+- Fixed the premature final-turn guard: investigation no longer requires room for two full uncached request histories. Atomic per-call reservations and all existing spending caps remain enforced.
+- Fresh reviews require at least $2 remaining before launching a sandbox or submitting inference. This prevents another fresh run from consuming a nearly exhausted revision allowance; it does not guarantee completion for $2.
+- The launcher installs core and affected Python packages offline, without dependencies, in a disposable source copy as UID 65534. Setup is bounded to two minutes inside the existing 20-minute session deadline. Failures and command records are available to Codex.
+- INCOMPLETE/COMPLETE_REVIEW now represents unfinished inspection and setup/resource gaps, with empty decision_needed and specific remaining checks. Actual product decisions still use ESCALATE and mention Jay.
+- Published results and failure notices include per-run settled model costs, unresolved reservations, sandbox allowance and cumulative revision spending. A management-only inspectOnly workflow retrieves historical accounting without inference or publication.
+- Verified: TypeScript and 39 reviewer tests; native Codex two-turn shell/structured-output smoke test; automatic package installation and all 131 Jev plugin tests in an offline AMD64 container, with one existing degenerate-calibration warning; Ruff, formatting, mypy and 1,720 core tests at 100% coverage (six optional rerun-sdk skips).
+- Live health confirms policy 3. Read-only diagnostic budget-audit-policy3 confirmed latest run 241f23cdf3337ce7a29fa055107c00cb83c95e4d046ba9d3 booked $0.568857 for four model calls plus $0.10 sandbox allowance, with no unresolved model reservations.
+- The current PR456 head has used $8.974748 of its authorized $10 cumulative cap; $1.025252 remains. No new paid review was launched because that is below the admission floor. No limits or historical charges were reset. Policy 3 has not yet produced a new live model review.

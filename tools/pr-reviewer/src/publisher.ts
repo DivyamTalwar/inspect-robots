@@ -1,5 +1,5 @@
 import { WorkerEntrypoint } from 'cloudflare:workers';
-import { APP_ID, CHECK_NAME, ExecutionRecords, REPO, SHA, current, renderReview, snapshot, validateReview, type Job } from './common';
+import { APP_ID, CHECK_NAME, ExecutionRecords, REPO, SHA, current, renderCost, renderReview, snapshot, validateReview, type Job } from './common';
 import { allowedRead, ciGreen, github, installationToken } from './github';
 import { renderHold } from './holds';
 
@@ -34,6 +34,7 @@ export class GithubPublisher extends WorkerEntrypoint<PublisherEnv> {
       body = renderReview(job, review, await ciGreen(read, job.head), executions);
       conclusion = review.verdict === 'APPROVE' ? 'success' : review.verdict === 'REQUEST_CHANGES' ? 'failure' : 'action_required';
     }
+    if (result && typeof result === 'object' && 'cost_summary' in result) body += renderCost(result.cost_summary);
     // Re-check after reads. Check runs always attach to the exact reviewed head.
     if (!current(job, snapshot(await read(`/pulls/${job.pr}`)))) return false;
     if (notice !== 'budget-warning') {

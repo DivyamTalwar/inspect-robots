@@ -41,6 +41,20 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
     const sums = this.ctx.storage.sql.exec<{ review: number; pr: number; month: number }>(`SELECT COALESCE(SUM(CASE WHEN job=? THEN amount ELSE 0 END),0) AS review, COALESCE(SUM(CASE WHEN pr=? THEN amount ELSE 0 END),0) AS pr, COALESCE(SUM(CASE WHEN month=? THEN amount ELSE 0 END),0) AS month FROM charges`, job, pr, month).one();
     return Math.max(0, Math.min(this.reviewLimit(job, pr) - sums.review, LIMITS.pr - sums.pr, LIMITS.month - sums.month));
   }
+  async costs(id: string) {
+    const job = await this.job(id);
+    if (!job) throw new Error('unknown_job');
+    // Existing charge IDs already contain the run ID; no reset or lossy migration.
+    const rows = this.ctx.storage.sql.exec<{ id: string; amount: number; settled: number }>(
+      'SELECT id,amount,settled FROM charges WHERE substr(id,1,?)=?', id.length + 1, `${id}-`).toArray();
+    const sandbox = rows.filter(r => r.id === `${id}-sandbox`);
+    const model = rows.filter(r => r.id.startsWith(`${id}-codex-`));
+    const sum = (entries: typeof rows) => entries.reduce((n, r) => n + r.amount, 0);
+    const headSpent = this.ctx.storage.sql.exec<{ amount: number }>('SELECT COALESCE(SUM(amount),0) AS amount FROM charges WHERE job=?', `${job.pr}-${job.head}`).one().amount;
+    return { modelMicros: sum(model.filter(r => r.settled)), reservedMicros: sum(model.filter(r => !r.settled)),
+      sandboxMicros: sum(sandbox), modelCalls: model.length, headSpentMicros: headSpent,
+      headLimitMicros: this.reviewLimit(`${job.pr}-${job.head}`, job.pr), remainingMicros: await this.remaining(`${job.pr}-${job.head}`, job.pr) };
+  }
   async reserve(id: string, job: string, pr: number, amount: number): Promise<boolean> {
     if (!Number.isSafeInteger(amount) || amount <= 0) throw new Error('invalid_amount');
     // All SQL is synchronous; the transaction cannot interleave with another reservation.

@@ -29,7 +29,7 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
     const params = { ...request, model: MODEL, reasoning: { ...request.reasoning, effort: 'high' }, service_tier: 'default', stream: true, background: false, store: false };
     delete params.max_output_tokens;
     const allowance = await ledger.remaining(`${job.pr}-${job.head}`, job.pr);
-    params.input = [...params.input, { role: 'developer', content: `The review has $${(allowance / 1_000_000).toFixed(2)} remaining, including this call. Preserve enough budget to write the final review; escalate any material evidence gaps instead of claiming a complete review.` }];
+    params.input = [...params.input, { role: 'developer', content: `The review has $${(allowance / 1_000_000).toFixed(2)} remaining, including this call. Preserve enough budget to write the final review; report INCOMPLETE for material evidence gaps instead of claiming a complete review.` }];
     let count;
     try { count = await client.responses.inputTokens.count({ model: MODEL, instructions: params.instructions, input: params.input, tools: params.tools, text: params.text, reasoning: params.reasoning }); }
     catch (error) {
@@ -41,9 +41,9 @@ export class ModelGateway extends WorkerEntrypoint<GatewayEnvironment> {
     const maxOutput = Math.min(16000, Math.floor((allowance - inputReservation) / 50));
     console.log(JSON.stringify({ event: 'model_allowance', job: job.id, inputTokens: count.input_tokens, remainingMicros: allowance, maxOutput }));
     if (maxOutput < 2000) return stop('budget_exhausted', 'Review budget exhausted', 429);
-    if (allowance < 2 * inputReservation + 600_000) {
+    if (allowance < inputReservation + 300_000) {
       params.tool_choice = 'none';
-      params.input[params.input.length - 1].content = 'Final review turn: budget cannot safely cover more investigation. Return review JSON now. Name exact unchecked files or behavior, the budget limit, and the next check. Escalate material gaps; do not blame missing scope approval or invent findings.';
+      params.input[params.input.length - 1].content = 'Final review turn: budget cannot safely cover more investigation. Return review JSON now. Name exact unchecked files or behavior, the budget limit, and the next check. Use INCOMPLETE with COMPLETE_REVIEW for unfinished inspection, empty decision_needed, and specific limitations. ESCALATE only for an actual product decision. Do not invent findings.';
     }
     const charge = `${job.id}-codex-${await digest(token + body)}`;
     if (!await ledger.reserve(charge, `${job.pr}-${job.head}`, job.pr, inputReservation + maxOutput * 50)) return new Response('Review budget or duplicate request guard', { status: 409 });

@@ -8,13 +8,13 @@ export const CHECK_NAME = 'Independent PR review';
 export const MODEL = 'gpt-6-astra';
 export const SHA = /^[a-f0-9]{40}$/;
 export const LIMITS = { review: 5_000_000, pr: 15_000_000, month: 200_000_000, warn: 160_000_000 };
-export const POLICY_VERSION = '2';
+export const POLICY_VERSION = '3';
 
 export const ReviewSchema = z.object({
   worthwhile: z.enum(['YES', 'NO', 'NEED_REVIEWER']),
   scope: z.enum(['ESTABLISHED', 'NEED_REVIEWER']).describe('Established project scope does not require a separate approval comment. NEED_REVIEWER requires a concrete product, maintenance or design decision, not merely absent prior approval.'),
-  verdict: z.enum(['APPROVE', 'REQUEST_CHANGES', 'ESCALATE']),
-  recommended_action: z.enum(['MERGE', 'REVISE', 'CLOSE', 'NEEDS_DECISION']),
+  verdict: z.enum(['APPROVE', 'REQUEST_CHANGES', 'ESCALATE', 'INCOMPLETE']),
+  recommended_action: z.enum(['MERGE', 'REVISE', 'CLOSE', 'NEEDS_DECISION', 'COMPLETE_REVIEW']),
   rationale: z.string().max(360).describe('TL;DR in one or two short sentences: what this PR changes and the main reason for the verdict. No background narrative or repeated verdict label.'),
   blockers: z.array(z.object({ file: z.string(), line: z.number().int(), trigger: z.string(), expected: z.string(), actual: z.string(), impact: z.string(), fix: z.string() })),
   contract_and_test_review: z.string(),
@@ -25,6 +25,17 @@ export const ReviewSchema = z.object({
   body: z.string(),
 });
 export type Review = z.infer<typeof ReviewSchema>;
+export const CostSummary = z.object({
+  modelMicros: z.number().int().nonnegative(), reservedMicros: z.number().int().nonnegative(),
+  sandboxMicros: z.number().int().nonnegative(), headSpentMicros: z.number().int().nonnegative(),
+  headLimitMicros: z.number().int().positive(), remainingMicros: z.number().int().nonnegative(),
+  modelCalls: z.number().int().nonnegative(),
+});
+export function renderCost(value: unknown): string {
+  const c = CostSummary.parse(value);
+  const money = (n: number) => `$${(n / 1_000_000).toFixed(3)}`;
+  return `\n\nBudget: this run booked ${money(c.modelMicros)} for ${c.modelCalls} model calls, plus ${money(c.sandboxMicros)} sandbox allowance${c.reservedMicros ? ` and ${money(c.reservedMicros)} unresolved model reservations` : ''}. This revision has used ${money(c.headSpentMicros)} of ${money(c.headLimitMicros)} across all runs; ${money(c.remainingMicros)} remains under all spending caps. These are conservative ledger amounts, not an invoice.`;
+}
 export const ExecutionRecords = z.array(z.object({ revision: z.string().regex(/^[a-f0-9]{40}$/), command: z.string().max(12000), exitCode: z.number().int().nullable(), limit: z.string().nullable() })).max(100);
 export type Snapshot = { number: number; head: string; base: string; title: string; body: string; draft: boolean; state: string; author: string };
 export type Job = { id: string; pr: number; head: string; base: string; scope: string; status: string; result: string | null; notified: number; created: number };
@@ -35,6 +46,7 @@ export function validateReview(value: unknown): Review {
   if (r.verdict === 'APPROVE' && (r.worthwhile !== 'YES' || r.scope !== 'ESTABLISHED' || !r.sufficient_review || r.blockers.length || r.recommended_action !== 'MERGE' || r.decision_needed.trim())) throw new Error('inconsistent_approval');
   if (r.verdict === 'REQUEST_CHANGES' && (!r.blockers.length || r.recommended_action !== 'REVISE' || r.scope !== 'ESTABLISHED' || r.worthwhile !== 'YES' || !r.sufficient_review)) throw new Error('inconsistent_changes');
   if (r.verdict === 'ESCALATE' && (!r.decision_needed.trim() || !['CLOSE', 'NEEDS_DECISION'].includes(r.recommended_action))) throw new Error('inconsistent_escalation');
+  if (r.verdict === 'INCOMPLETE' && (r.sufficient_review || r.recommended_action !== 'COMPLETE_REVIEW' || r.decision_needed.trim() || !r.limitations.length)) throw new Error('inconsistent_incomplete');
   for (const b of r.blockers) if (b.line < 1 || !b.file || !b.trigger || !b.expected || !b.actual || !b.fix) throw new Error('unsupported_blocker');
   return r;
 }
@@ -89,6 +101,7 @@ export function renderReview(job: Job, review: Review, ciGreen: boolean, executi
   let body = `**TL;DR:** ${review.verdict}. ${publicText(review.rationale).replace(/\s+/g, ' ').trim()}`;
   if (review.verdict === 'APPROVE') body += ciGreen ? '\n\n@jeqcho, review approved and ci-ok is green for this revision. Please review and merge if you agree.' : '\n\nReview approved. Waiting for ci-ok before requesting a merge.';
   else if (review.verdict === 'ESCALATE') body += `\n\n@jeqcho, ${review.recommended_action === 'CLOSE' ? 'please decide whether to close this PR. ' : 'your decision is needed. '}${publicText(review.decision_needed).replace(/\s+/g, ' ').trim()}`;
+  else if (review.verdict === 'INCOMPLETE') body += '\n\nThe reviewer could not finish. The outstanding checks are listed below; no merge or closure recommendation was issued. This does not require a product decision.';
   else body += `\n\nPlease address the ${review.blockers.length === 1 ? 'blocking finding' : `${review.blockers.length} blocking findings`} detailed below.`;
   body += `\n\n<details>\n<summary>Review details, findings and checks</summary>\n\nAutomated independent review of commit \`${job.head}\` (base \`${job.base}\`).\n\nWorthwhile: ${review.worthwhile}\nScope: ${review.scope}\nRecommendation: ${review.recommended_action}\n\n${publicText(review.body)}\n\nContracts and tests: ${publicText(review.contract_and_test_review)}`;
   for (const b of review.blockers) body += `\n\n${publicText(b.file)}:${b.line}: ${publicText(b.trigger)}\nExpected: ${publicText(b.expected)}\nObserved from code: ${publicText(b.actual)}\nImpact: ${publicText(b.impact)}\nSuggested fix: ${publicText(b.fix)}`;

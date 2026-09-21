@@ -1,7 +1,7 @@
 import { env, createExecutionContext, evictDurableObject } from 'cloudflare:test';
 import { describe, expect, it, vi } from 'vitest';
 import { exportPKCS8, generateKeyPair } from 'jose';
-import { current, publicText, renderReview, validateReview, verifySignature, type Job, type Review } from '../src/common';
+import { current, publicText, renderCost, renderReview, validateReview, verifySignature, type Job, type Review } from '../src/common';
 import { allowedRead, ciGreen, github } from '../src/github';
 import { collectContext, readFile, safePath } from '../src/context';
 import { GithubPublisher } from '../src/publisher';
@@ -36,6 +36,15 @@ describe('review gates', () => {
     expect(escalated).toContain('@jeqcho, please decide whether to close');
     expect(escalated.indexOf('The existing plan excludes this dependency.')).toBeLessThan(escalated.indexOf('<details>'));
   });
+  it('separates incomplete technical review from a human decision', () => {
+    const partial: Review = { ...approval, verdict: 'INCOMPLETE', recommended_action: 'COMPLETE_REVIEW', sufficient_review: false, limitations: ['Inspect scorer.py lines 40-90; session ran out of time.'] };
+    expect(validateReview(partial).verdict).toBe('INCOMPLETE');
+    const text = renderReview(job, partial, false);
+    expect(text).toContain('TL;DR:** INCOMPLETE');
+    expect(text).not.toContain('@jeqcho');
+    expect(text).not.toContain('your decision is needed');
+    for (const change of [{ sufficient_review: true }, { recommended_action: 'MERGE' }, { decision_needed: 'Run pytest' }, { limitations: [] }]) expect(() => validateReview({ ...partial, ...change })).toThrow();
+  });
   it('neutralizes untrusted mentions, links and hidden markup', () => {
     const output = publicText('<!-- hidden --><img src=x> @jeqcho ![secret](https://bad.test/key) https://bad.test');
     expect(output).not.toMatch(/@jeqcho|https:|<img|<!--/);
@@ -67,6 +76,21 @@ describe('budget ledger in the Workers runtime', () => {
     expect(accepted.filter(Boolean)).toHaveLength(10);
     expect(await ledger.reserve('another-head', `456-${head}`, 456, 5_000_000)).toBe(true);
     expect(await ledger.reserve('pr-ceiling', `456-${base}`, 456, 1)).toBe(false);
+  });
+  it('reports each run separately while retaining cumulative revision spending', async () => {
+    const ledger = env.LEDGER.getByName(crypto.randomUUID());
+    await ledger.register(job);
+    await ledger.reserve(`${job.id}-sandbox`, `9-${head}`, 9, 100000);
+    await ledger.reserve(`${job.id}-codex-settled`, `9-${head}`, 9, 500000);
+    await ledger.settle(`${job.id}-codex-settled`, 123456);
+    await ledger.reserve(`${job.id}-codex-uncertain`, `9-${head}`, 9, 300000);
+    await ledger.reserve('other-run-codex-settled', `9-${head}`, 9, 1000000);
+    await evictDurableObject(ledger);
+    const costs = await ledger.costs(job.id);
+    expect(costs).toEqual({ modelMicros: 123456, reservedMicros: 300000, sandboxMicros: 100000, headSpentMicros: 1523456, headLimitMicros: 5000000, remainingMicros: 3476544, modelCalls: 2 });
+    expect(renderCost(costs)).toContain('$0.123');
+    expect(renderCost(costs)).toContain('$0.300 unresolved model reservations');
+    expect(() => renderCost({ ...costs, modelMicros: -1 })).toThrow();
   });
   it('atomically limits concurrent reservations and disallows duplicate charges', async () => {
     const ledger = env.LEDGER.getByName(crypto.randomUUID());

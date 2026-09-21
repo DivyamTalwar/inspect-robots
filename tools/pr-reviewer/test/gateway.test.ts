@@ -46,6 +46,20 @@ describe('Codex private budget gateway', () => {
     await (await s.gateway.respond(s.token, request)).text();
     expect(await s.ledger.remaining(`99-${job.head}`, 99)).toBe(5_000_000 - 840);
   });
+  it('continues investigation when the current call is funded despite a large uncached history', async () => {
+    const s = await setup();
+    await s.ledger.reserve('earlier-runs', `99-${job.head}`, 99, 3_000_000);
+    vi.stubGlobal('fetch', vi.fn(async (url: string | Request, init?: RequestInit) => {
+      const r = new Request(url, init);
+      if (r.url.endsWith('/input_tokens')) return Response.json({ input_tokens: 80000 });
+      const p: any = await r.json();
+      expect(p.tool_choice).not.toBe('none');
+      expect(p.max_output_tokens).toBe(16000);
+      return new Response('data: {"type":"response.completed","response":{"usage":{"input_tokens":80000,"output_tokens":10}}}\n\n');
+    }));
+    await (await s.gateway.respond(s.token, request)).text();
+    expect(await s.ledger.remaining(`99-${job.head}`, 99)).toBe(959500);
+  });
   it('reserves a final answer turn near the budget boundary and records a hard stop', async () => {
     const s = await setup();
     await s.ledger.reserve('prior-spending', `99-${job.head}`, 99, 4_700_000);
