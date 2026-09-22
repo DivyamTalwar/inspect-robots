@@ -479,3 +479,62 @@ describe('ready and reopened PR lifecycle', () => {
     expect(await s.ledger.claimReviewSlot(replacement!)).toBe('acquired');
   });
 });
+
+describe('operator recovery of held saved results', () => {
+  async function held(withOutput = true) {
+    const s = setup(); await s.ledger.register(job); await s.ledger.claimReviewSlot(job.id);
+    const execution = await s.ledger.prepareExecution(job.id, base);
+    if (withOutput) await s.ledger.checkpoint(execution.token, completeOutput);
+    await s.ledger.closeSession(execution.token);
+    await s.ledger.sandboxCleaned(job.id);
+    await s.ledger.finish(job.id, 'held', JSON.stringify({ code: 'invalid_review_result' }));
+    await s.ledger.releaseReviewSlot(job.id);
+    const publish = vi.fn(async () => true);
+    const workflow = Object.create(ReviewWorkflow.prototype) as ReviewWorkflow;
+    Object.defineProperty(workflow, 'env', { value: { ...s.config, PUBLISHER: { ...s.config.PUBLISHER, publish } } });
+    const run = () => workflow.run({ instanceId: 'operator-recovery', payload: { id: job.id, recoverSaved: true } } as any, s.step as WorkflowStep);
+    return { ...s, execution, publish, run };
+  }
+  it('revalidates and publishes through the complete workflow without new inference or spending', async () => {
+    const s = await held();
+    await s.ledger.reserve('prior-spending', `9-${head}`, 9, 4_900_000);
+    const costs = await s.ledger.costs(job.id);
+    await s.run();
+    expect((await s.ledger.job(job.id))?.status).toBe('approved');
+    expect(s.publish).toHaveBeenCalledWith(expect.objectContaining({ id: job.id }), expect.objectContaining({ verdict: 'APPROVE' }));
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+    expect(s.config.RUNNER.poll).not.toHaveBeenCalled();
+    expect(await s.ledger.runOutput(job.id)).toBe(completeOutput);
+    expect(await s.ledger.execution(job.id)).toEqual(s.execution);
+    expect(await s.ledger.costs(job.id)).toEqual(costs);
+    expect((await s.ledger.queueState()).owner).toBeNull();
+    await s.run(); // A repeated operator request must not reopen the verdict.
+    expect(s.publish).toHaveBeenCalledTimes(3); // Queued, started, final verdict.
+  });
+  it.each(['stale', 'security_stopped', 'done'])('does not revive a %s job with saved output', async status => {
+    const s = await held(); await s.ledger.finish(job.id, status);
+    await s.run();
+    expect((await s.ledger.job(job.id))?.status).toBe(status);
+    expect(s.publish).not.toHaveBeenCalled();
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+  });
+  it('does not recover a held job without a saved output', async () => {
+    const s = await held(false); await s.run();
+    expect((await s.ledger.job(job.id))?.status).toBe('held');
+    expect(s.publish).not.toHaveBeenCalled();
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+  });
+  it('respects the persistent safety pause', async () => {
+    const s = await held(); await s.ledger.pauseReviewQueue(true); await s.run();
+    expect((await s.ledger.job(job.id))?.status).toBe('held');
+    expect(s.publish).not.toHaveBeenCalled();
+  });
+  it('refuses a saved result when the live PR revision has changed', async () => {
+    const s = await held();
+    s.read.mockResolvedValue(JSON.stringify({ ...pr, head: { sha: 'c'.repeat(40) } }));
+    await s.run();
+    expect((await s.ledger.job(job.id))?.status).toBe('held');
+    expect(s.publish).not.toHaveBeenCalled();
+    expect(s.config.RUNNER.start).not.toHaveBeenCalled();
+  });
+});

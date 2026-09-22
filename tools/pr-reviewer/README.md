@@ -304,9 +304,13 @@ to inspect the active slot owner and FIFO backlog without inference or publishin
 
 Operators can also use `"inspectOutput":true` instead of `"inspectOnly":true` to
 read a saved terminal artifact and its costs when diagnosing validation failures.
-This does not launch a process or publish a comment. To recover after a validator
-fix, create a workflow instance with the original job ID; saved-output recovery
-reuses that result without inference.
+This does not launch a process or publish a comment. After a validator fix, an
+operator can revalidate a held job's saved output using
+`{"id":"ORIGINAL_JOB_ID","recoverSaved":true}`. This explicitly returns only a
+held job with saved output to the queue, preserving its execution and charges.
+Stale revisions, security-stopped jobs, a paused queue and jobs without output
+cannot use this path. The full workflow revalidates and publishes the saved
+result without inference. GitHub `/review` still requests a genuine fresh run.
 
 This management-only diagnostic also works for historical run charge IDs. It
 does not reset charges, change limits, or accept parameters from PR text.

@@ -120,6 +120,19 @@ export class ReviewLedger extends DurableObject<ReviewerEnv> {
   async finish(id: string, status: string, result: string | null = null): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE jobs SET status=?,result=? WHERE id=?', status, result, id);
   }
+  async recoverSavedReview(id: string): Promise<boolean> {
+    return this.ctx.storage.transactionSync(() => {
+      if (this.queuePausedNow()) return false;
+      const job = this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0];
+      if (job?.status !== 'held') return false;
+      const saved = this.ctx.storage.sql.exec<{ output: string | null }>('SELECT output FROM executions WHERE job=?', id).toArray()[0];
+      if (saved?.output == null) return false;
+      // Operator-requested revalidation only. Preserve the execution and charges;
+      // stale or security-stopped jobs must never be revived by this path.
+      this.ctx.storage.sql.exec("UPDATE jobs SET status='queued',result=NULL WHERE id=?", id);
+      return true;
+    });
+  }
   async startReview(id: string): Promise<boolean> {
     return this.ctx.storage.transactionSync(() => {
       const job = this.ctx.storage.sql.exec<Job>('SELECT * FROM jobs WHERE id=?', id).toArray()[0];

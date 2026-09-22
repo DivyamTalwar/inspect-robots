@@ -44,8 +44,8 @@ export async function handleWebhook(request: Request, env: WebhookEnvironment): 
   return new Response('Accepted', { status: 202 });
 }
 
-export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean; pauseReviews?: boolean }> {
-  async run(event: WorkflowEvent<{ id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean; pauseReviews?: boolean }>, step: WorkflowStep) {
+export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean; recoverSaved?: boolean; pauseReviews?: boolean }> {
+  async run(event: WorkflowEvent<{ id: string; inspectOnly?: boolean; inspectOutput?: boolean; inspectQueue?: boolean; recoverSaved?: boolean; pauseReviews?: boolean }>, step: WorkflowStep) {
     const ledger = () => this.env.LEDGER.getByName('budget');
     if (event.payload.pauseReviews !== undefined) {
       // Operator-only management invocation. Never taken from a GitHub webhook.
@@ -71,6 +71,15 @@ export class ReviewWorkflow extends WorkflowEntrypoint<ReviewerEnv, { id: string
     if (event.payload.inspectOutput === true) {
       const raw = await ledger().runOutput(job.id);
       return JSON.stringify({ output: raw === null ? null : JSON.parse(raw), cost_summary: await ledger().costs(job.id) });
+    }
+    if (event.payload.recoverSaved === true) {
+      // Management API only. GitHub /review always requests a fresh model run.
+      const recover = await step.do('recover held saved output', async () => {
+        if (this.env.ENABLED !== 'true') return false;
+        if (!current(job, snapshot(await read(this.env, `/pulls/${job.pr}`)))) return false;
+        return ledger().recoverSavedReview(job.id);
+      });
+      if (!recover) return;
     }
     try {
       if (this.env.ENABLED !== 'true') throw new Error('reviewer_disabled');
