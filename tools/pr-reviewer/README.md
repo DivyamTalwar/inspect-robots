@@ -103,8 +103,10 @@ checks both boundaries before executing builds or making paid model calls; an
 unsupported control stops the run, with no unsandboxed fallback. The client itself
 retains access to the private model gateway. Scratch files
 persist within that fresh session and are destroyed afterward. Python 3.11,
-NumPy, pytest, hypothesis, pip, Hatch and rg are preinstalled. Offline local package
-builds run automatically for core and changed Python packages, using a disposable
+NumPy, pytest, pytest-cov, hypothesis, pip, Hatch, httpx, websockets, mypy, Ruff
+and rg are preinstalled. These include the agent plugin’s declared runtime and
+Python test dependencies; package versions are pinned in the Dockerfile. Offline
+local package builds run automatically for core and changed Python packages, using a disposable
 copy of the source and synthetic version 0.0.0. Installation is offline, without
 dependencies or build isolation, as the build user; each package has
 a 45-second limit and setup has a 2-minute total limit. Codex receives setup.json
@@ -324,3 +326,13 @@ completion/cleanup acknowledgements. It has no GitHub publisher and does not
 review or comment on a real PR. Replay must preserve its terminal output with
 one launch and two synthetic model turns total. Delete the probe resources after
 verification; they are not part of the production service.
+
+The credential-free isolation probe also checks dependency availability and
+runs agent tests under the real native Codex tool sandbox. Trigger it
+with `{"head":"HEAD_SHA","base":"MERGE_BASE_SHA"}` to test those immutable
+snapshots. It checks installed versions against the plugin’s declarations,
+builds the local packages offline, then records pytest collection, the affected
+policy suite and a full-suite attempt. The full suite includes localhost-server
+tests that the production network boundary denies; their failures are retained,
+and a completed probe does not claim that every test passed. Omit the parameters
+to run the malicious-build and client-isolation regressions. Neither mode calls a model or publishes a PR review.

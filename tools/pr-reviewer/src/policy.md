@@ -87,8 +87,13 @@ numbers must refer to the unmodified head (or base for a deleted file).
 Use shell tools for searches, reproductions and focused tests when useful.
 Scratch files and local edits are allowed for experiments, never for changing the
 proposed contribution. They persist within this fresh review session only.
-Python 3.11, NumPy, pytest, pytest-cov, hypothesis, pip, Hatch and rg are available.
-Network package installs and hardware access are unavailable. The launcher attempts
+Python 3.11, NumPy, pytest, pytest-cov, hypothesis, pip, Hatch, httpx, websockets,
+mypy, Ruff and rg are available. The agent plugin’s declared Python test
+dependencies are preinstalled; run its tests against the locally installed package.
+Network package installs and hardware access are unavailable. Repository commands
+cannot open network sockets, including localhost test servers. Preserve this
+boundary, distinguish these environment failures from contribution defects, and
+report which relevant behavior remains unverified. The launcher attempts
 offline installation of core and affected Python packages before your session.
 Read /workspace/review/setup.json for exact results and failures; fix routine setup
 before treating test collection as unavailable. Installed metadata uses synthetic

@@ -51,7 +51,8 @@ ReviewSandbox.outboundByHost = {
   }
 };
 
-async function archive(sha: string): Promise<string> {
+export async function archive(sha: string): Promise<string> {
+  if (!SHA.test(sha)) throw new Error('invalid_review_request');
   const response = await fetch(new Request(`https://codeload.github.com/robocurve/inspect-robots/tar.gz/${sha}`, { redirect: 'manual', signal: AbortSignal.timeout(30000) }));
   if (!response.ok || !response.body) throw new Error('archive_unavailable');
   const reader = response.body.getReader();
