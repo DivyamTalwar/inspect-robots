@@ -12,7 +12,7 @@ All notable changes to this project are documented here. The format is based on
 - **Core:** Optional `bind_task(envelope)` policy hook called before rollouts with
   the task identity and horizon ([#407](https://github.com/robocurve/inspect-robots/issues/407)).
 
-- **Agent plugin (0.26.0):** Surface environment step budget in system prompt and
+- **Agent plugin (0.27.0):** Surface environment step budget in system prompt and
   per-observation step count ([#407](https://github.com/robocurve/inspect-robots/issues/407)).
 
 - **Setup wizard:** embodiment plugins can declare bounded numeric settings,
@@ -46,13 +46,16 @@ All notable changes to this project are documented here. The format is based on
 
 ### Fixed
 
+- **CaP-X plugin (0.3.1):** Clamp motion targets and interpolated actions to
+  the embodiment action bounds.
+
 - **CLI:** `--epochs N` now overrides only the epoch count. A task declared with
   a non-default reducer (`Epochs(count=5, reducer="pass_at_2")`, `max`, `mode`)
   keeps that reducer under `run --epochs` and `eval-set --epochs`; previously the
   flag silently replaced it with `mean`, so the reported metric was computed with
   the wrong reducer.
 
-- **Agent plugin (0.26.0):** Transcript paths are now sanitised; wire-capture
+- **Agent plugin (0.27.0):** Transcript paths are now sanitised; wire-capture
   directories are renamed to share the same stem as `transcripts/` and
   `actions/` ([#370](https://github.com/robocurve/inspect-robots/issues/370)).
 
